@@ -9,7 +9,6 @@ from contextlib import closing
 import app as app_module
 from app import app, init_db
 
-
 @pytest.fixture
 def client_with_image():
     temp_dir = tempfile.TemporaryDirectory()
