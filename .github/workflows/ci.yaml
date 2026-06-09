@@ -1,5 +1,22 @@
-- name: Upload coverage to Codecov
-  uses: codecov/codecov-action@v3
-  with:
-    file: services/yolo/coverage.xml
-    fail_ci_if_error: true
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        working-directory: services/yolo
+        run: pytest --cov=app --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: services/yolo/coverage.xml
+          fail_ci_if_error: true
