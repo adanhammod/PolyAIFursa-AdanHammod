@@ -4,6 +4,8 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from ultralytics import YOLO
 from PIL import Image
 from fastapi import HTTPException
+from contextlib import closing
+
 import sqlite3
 import logging
 import os
@@ -45,7 +47,7 @@ model = YOLO("yolov8n.pt")
 
 # Initialize SQLite
 def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         # Create the predictions main table to store the prediction session
         conn.execute("""
             CREATE TABLE IF NOT EXISTS prediction_sessions (
@@ -73,26 +75,32 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_label ON detection_objects (label)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_score ON detection_objects (score)")
 
+        conn.commit()
+
 
 def save_prediction_session(uid, original_image, predicted_image):
     """
     Save prediction session to database
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.execute("""
             INSERT INTO prediction_sessions (uid, original_image, predicted_image)
             VALUES (?, ?, ?)
         """, (uid, original_image, predicted_image))
 
+        conn.commit()
+
 def save_detection_object(prediction_uid, label, score, box):
     """
     Save detection object to database
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.execute("""
             INSERT INTO detection_objects (prediction_uid, label, score, box)
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
+
+        conn.commit()
 
 @app.post("/predict")
 def predict(file: UploadFile = File(...)):
@@ -147,7 +155,7 @@ def get_prediction_by_uid(uid: str):
     """
     Get prediction session by uid with all detected objects
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         # Get prediction session
         session = conn.execute("SELECT * FROM prediction_sessions WHERE uid = ?", (uid,)).fetchone()
@@ -181,7 +189,7 @@ def get_prediction_image(uid: str):
     """
     Return the annotated (bounding-box) image for a prediction
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         row = conn.execute(
             "SELECT predicted_image FROM prediction_sessions WHERE uid = ?", (uid,)
         ).fetchone()
@@ -190,6 +198,82 @@ def get_prediction_image(uid: str):
     return FileResponse(row[0])
 
 
+@app.get("/predictions/label/{label}")
+def get_predictions_by_label(label: str):
+    """
+    Return all prediction sessions containing at least one detected object with the given label
+    """
+    if not label or label.strip() == "":
+        raise HTTPException(status_code = 400, detail = "Label cannot be empty")
+
+    
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        
+        # Find all prediction UIDs that have at least one object with this label
+        sessions_with_label = conn.execute("""
+            SELECT DISTINCT ps.uid, ps.timestamp
+            FROM prediction_sessions ps
+            INNER JOIN detection_objects do ON ps.uid = do.prediction_uid
+            WHERE do.label = ?
+        """, (label,)).fetchall()
+        
+        results = []
+        for session in sessions_with_label:
+            # Get all detection objects with the matching label for this session
+            objects = conn.execute("""
+                SELECT id, label, score, box
+                FROM detection_objects
+                WHERE prediction_uid = ? AND label = ?
+            """, (session["uid"], label)).fetchall()
+            
+            results.append({
+                "uid": session["uid"],
+                "timestamp": session["timestamp"],
+                "detection_objects": [
+                    {
+                        "id": obj["id"],
+                        "label": obj["label"],
+                        "score": obj["score"],
+                        "box": obj["box"]
+                    } for obj in objects
+                ]
+            })
+        
+        return results
+@app.get("/predictions/score/{min_score}")
+def get_predictions_by_score(min_score: float):
+    """
+    Return all detection objects with score >= min_score.
+    min_score must be between 0.0 and 1.0.
+    """
+
+    if not 0.0 <= min_score <= 1.0:
+        raise HTTPException(
+            status_code=400,
+            detail="min_score must be between 0.0 and 1.0"
+        )
+
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+
+        rows = conn.execute("""
+            SELECT id, prediction_uid, label, score, box
+            FROM detection_objects
+            WHERE score >= ?
+        """, (min_score,)).fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "prediction_uid": row["prediction_uid"],
+                "label": row["label"],
+                "score": row["score"],
+                "box": row["box"]
+            }
+            for row in rows
+        ]
+
 @app.get("/health")
 def health():
     """
@@ -197,7 +281,7 @@ def health():
     """
     return {"status": "ok"}
 
-if __name__ == "__main__":
+if __name__ == "__main__": # pragma: no cover   
     import uvicorn
 
     init_db()
