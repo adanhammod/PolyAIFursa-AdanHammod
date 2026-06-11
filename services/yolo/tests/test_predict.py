@@ -8,7 +8,6 @@ os.environ.setdefault("CONFIDENCE_THRESHOLD", "0.5")
 
 from app import app, init_db
 
-
 class FakeBox:
     cls = [type("FakeValue", (), {"item": lambda self: 0})()]
     conf = [0.91]
