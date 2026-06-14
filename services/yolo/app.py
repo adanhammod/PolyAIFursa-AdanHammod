@@ -241,6 +241,7 @@ def get_predictions_by_label(label: str):
             })
         
         return results
+    
 @app.get("/predictions/score/{min_score}")
 def get_predictions_by_score(min_score: float):
     """

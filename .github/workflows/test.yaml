@@ -26,7 +26,7 @@ jobs:
       - name: Run tests with coverage
         working-directory: services/yolo
         run: |
-          pytest --cov=app --cov-report=xml tests/
+          pytest tests/
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
