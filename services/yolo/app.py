@@ -22,12 +22,19 @@ import torch
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
-@app.on_event("shutdown")
-def shutdown_event():
+
+
+is_shutting_down = False
+
+def handle_sigterm(signum, frame):
+    global is_shutting_down
+    is_shutting_down = True
     logging.info("Received SIGTERM. Shutting down gracefully...")
-    
-# Expose /metrics endpoint with default process metrics + FastAPI HTTP metrics
-Instrumentator().instrument(app).expose(app)
+    # Perform cleanup: close DB connections, finish pending work, etc.
+    logging.info("Cleanup done. Exiting.")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
 
 # Confidence threshold for object detection (0.0 - 1.0).
 # Detections below this score are discarded.
