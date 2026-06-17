@@ -6,6 +6,8 @@ from PIL import Image
 from fastapi import HTTPException
 from contextlib import closing
 
+import sys
+import signal
 import sqlite3
 import logging
 import os
@@ -284,6 +286,14 @@ def health():
 
 if __name__ == "__main__": # pragma: no cover   
     import uvicorn
+    import signal
+    import sys
+
+    def handle_sigterm(signum, frame):
+        logging.info("Received SIGTERM. Shutting down gracefully...")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
 
     init_db()
     
