@@ -6,6 +6,8 @@ from PIL import Image
 from fastapi import HTTPException
 from contextlib import closing
 
+import sys
+import signal
 import sqlite3
 import logging
 import os
@@ -20,7 +22,10 @@ import torch
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
-
+@app.on_event("shutdown")
+def shutdown_event():
+    logging.info("Received SIGTERM. Shutting down gracefully...")
+    
 # Expose /metrics endpoint with default process metrics + FastAPI HTTP metrics
 Instrumentator().instrument(app).expose(app)
 
@@ -284,6 +289,14 @@ def health():
 
 if __name__ == "__main__": # pragma: no cover   
     import uvicorn
+    import signal
+    import sys
+
+    def handle_sigterm(signum, frame):
+        logging.info("Received SIGTERM. Shutting down gracefully...")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
 
     init_db()
     
