@@ -22,7 +22,10 @@ import torch
 torch.cuda.is_available = lambda: False
 
 app = FastAPI()
-
+@app.on_event("shutdown")
+def shutdown_event():
+    logging.info("Received SIGTERM. Shutting down gracefully...")
+    
 # Expose /metrics endpoint with default process metrics + FastAPI HTTP metrics
 Instrumentator().instrument(app).expose(app)
 
