@@ -300,16 +300,9 @@ def ready():
         raise HTTPException(status_code=503, detail="Service is shutting down")
     return {"status": "ready"}
 
-if __name__ == "__main__": # pragma: no cover   
+
+if __name__ == "__main__":  # pragma: no cover
     import uvicorn
-    import signal
-    import sys
-
-    def handle_sigterm(signum, frame):
-        logging.info("Received SIGTERM. Shutting down gracefully...")
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, handle_sigterm)
 
     init_db()
     
