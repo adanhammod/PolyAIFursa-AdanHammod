@@ -295,6 +295,13 @@ def health():
     """
     return {"status": "ok"}
 
+@app.get("/health2")
+def health2():
+    """
+    Health check endpoint
+    """
+    return {"status": "ok"}   
+
 @app.get("/ready")
 def ready():
     if is_shutting_down:
