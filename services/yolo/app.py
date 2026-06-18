@@ -162,6 +162,7 @@ def predict(file: UploadFile = File(...)):
         "time_took": processing_time
     }
 
+# prediction endpoint
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
     """
