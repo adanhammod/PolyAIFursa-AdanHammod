@@ -46,6 +46,18 @@ SYSTEM_PROMPT = (
 )
 
 _current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
+_annotated_image_url: ContextVar[Optional[str]] = ContextVar("annotated_image_url", default=None)
+
+_SHOW_IMAGE_KEYWORDS = {
+    "show image", "show me the image", "show result", "show me the result",
+    "annotated image", "bounding box", "bounding boxes", "detections image",
+    "detection image", "show annotation", "show annotations",
+}
+
+def _user_wants_image(text: str) -> bool:
+    lower = text.lower()
+    return any(kw in lower for kw in _SHOW_IMAGE_KEYWORDS)
+
 
 @tool
 def detect_objects() -> str:
@@ -61,7 +73,16 @@ def detect_objects() -> str:
             files={"file": ("image.jpg", io.BytesIO(image_bytes), "image/jpeg")},
         )
         response.raise_for_status()
-    return json.dumps(response.json())
+
+    result = response.json()
+    prediction_uid = result.get("prediction_uid")
+
+    if prediction_uid:
+        url = f"{YOLO_SERVICE_URL}/prediction/{prediction_uid}/image"
+        result["annotated_image_url"] = url
+        _annotated_image_url.set(url)
+
+    return json.dumps(result)
 
 
 # Registry: map tool name -> tool function
@@ -129,6 +150,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    annotated_image_base64: Optional[str] = None
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -147,11 +169,28 @@ def chat(request: ChatRequest):
         else:
             lc_messages.append(AIMessage(content=msg.content))
 
-    token = _current_image_b64.set(latest_image)
+    latest_user_text = next(
+        (msg.content for msg in reversed(request.messages) if msg.role == "user"), ""
+    )
+
+    token_img = _current_image_b64.set(latest_image)
+    token_url = _annotated_image_url.set(None)
     try:
-        return ChatResponse(response=run_agent(lc_messages))
+        response_text = run_agent(lc_messages)
+        annotated_image_b64 = None
+
+        if _user_wants_image(latest_user_text):
+            image_url = _annotated_image_url.get()
+            if image_url:
+                with httpx.Client(timeout=10.0) as client:
+                    img_resp = client.get(image_url)
+                    img_resp.raise_for_status()
+                annotated_image_b64 = base64.b64encode(img_resp.content).decode()
+
+        return ChatResponse(response=response_text, annotated_image_base64=annotated_image_b64)
     finally:
-        _current_image_b64.reset(token)
+        _current_image_b64.reset(token_img)
+        _annotated_image_url.reset(token_url)
 
 
 @app.get("/health")
