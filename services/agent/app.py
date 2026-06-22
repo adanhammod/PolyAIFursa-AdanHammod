@@ -42,11 +42,16 @@ if MODEL not in ALLOWED_MODELS:
 
 SYSTEM_PROMPT = (
     "You are an AI vision assistant. You help users understand and analyze images. "
-    "Use the available tools to extract information from images. "
+    "Use detect_objects to identify what is in an image when one is provided. "
+    "Use get_annotated_image ONLY when the user explicitly asks to see, view, show, or "
+    "display the detection result, annotated image, or bounding boxes. "
+    "Do not call get_annotated_image unless the user specifically requests to see the image. "
+    "Never include raw image URLs in your response text."
 )
 
 _current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
 _annotated_image_url: ContextVar[Optional[str]] = ContextVar("annotated_image_url", default=None)
+_should_show_image: ContextVar[bool] = ContextVar("should_show_image", default=False)
 
 @tool
 def detect_objects() -> str:
@@ -74,9 +79,18 @@ def detect_objects() -> str:
     return json.dumps(result)
 
 
+@tool
+def get_annotated_image() -> str:
+    """Display the annotated image with bounding boxes from the most recent detection.
+    Call this ONLY when the user explicitly asks to see, show, view, or display the
+    detection result, annotated image, or bounding boxes."""
+    return json.dumps({"status": "The annotated image will be displayed to the user."})
+
+
 # Registry: map tool name -> tool function
 TOOLS = {
-    detect_objects.name: detect_objects
+    detect_objects.name: detect_objects,
+    get_annotated_image.name: get_annotated_image,
 }
 
 llm = init_chat_model(MODEL, temperature=0)
@@ -123,6 +137,9 @@ def run_agent(history: list , max_iterations: int = 10) -> str:
                     _annotated_image_url.set(image_url)
             except Exception:
                 logging.exception("Failed to parse tool result for annotated_image_url")
+
+            if tool_call["name"] == get_annotated_image.name:
+                _should_show_image.set(True)
 
 
 app = FastAPI(title="Vision Agent")
@@ -171,14 +188,15 @@ def chat(request: ChatRequest):
 
     token_img = _current_image_b64.set(latest_image)
     token_url = _annotated_image_url.set(None)
+    token_show = _should_show_image.set(False)
     try:
         response_text = run_agent(lc_messages)
         annotated_image_b64 = None
 
         image_url = _annotated_image_url.get()
-        logging.info("Annotated image URL: %s", image_url)
+        should_show = _should_show_image.get()
+        logging.info("Annotated image URL: %s | show: %s", image_url, should_show)
 
-        # Strip any lines the LLM included that reference the raw image URL
         response_text = "\n".join(
             line for line in response_text.splitlines()
             if "Annotated image:" not in line
@@ -186,7 +204,7 @@ def chat(request: ChatRequest):
             and (not image_url or image_url not in line)
         ).strip()
 
-        if image_url:
+        if image_url and should_show:
             try:
                 with httpx.Client(timeout=10.0) as client:
                     img_resp = client.get(image_url)
@@ -199,6 +217,7 @@ def chat(request: ChatRequest):
     finally:
         _current_image_b64.reset(token_img)
         _annotated_image_url.reset(token_url)
+        _should_show_image.reset(token_show)
 
 
 @app.get("/health")
