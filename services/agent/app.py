@@ -46,6 +46,7 @@ SYSTEM_PROMPT = (
 )
 
 _current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
+_annotated_image_url: ContextVar[Optional[str]] = ContextVar("annotated_image_url", default=None)
 
 @tool
 def detect_objects() -> str:
@@ -61,7 +62,16 @@ def detect_objects() -> str:
             files={"file": ("image.jpg", io.BytesIO(image_bytes), "image/jpeg")},
         )
         response.raise_for_status()
-    return json.dumps(response.json())
+
+    result = response.json()
+    prediction_uid = result.get("prediction_uid")
+
+    if prediction_uid:
+        url = f"{YOLO_SERVICE_URL}/prediction/{prediction_uid}/image"
+        result["annotated_image_url"] = url
+        _annotated_image_url.set(url)
+
+    return json.dumps(result)
 
 
 # Registry: map tool name -> tool function
@@ -103,6 +113,17 @@ def run_agent(history: list , max_iterations: int = 10) -> str:
             tool_result = tool_fn.invoke(tool_call)          # returns a ToolMessage
             messages.append(tool_result)
 
+            # LangChain invokes tools in a copied context, so ContextVar.set() inside
+            # the tool is invisible to chat(). Extract the URL from the ToolMessage here,
+            # where we share the same context as the caller.
+            try:
+                payload = json.loads(tool_result.content)
+                image_url = payload.get("annotated_image_url")
+                if image_url:
+                    _annotated_image_url.set(image_url)
+            except Exception:
+                logging.exception("Failed to parse tool result for annotated_image_url")
+
 
 app = FastAPI(title="Vision Agent")
 
@@ -129,6 +150,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    annotated_image_base64: Optional[str] = None
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -147,11 +169,36 @@ def chat(request: ChatRequest):
         else:
             lc_messages.append(AIMessage(content=msg.content))
 
-    token = _current_image_b64.set(latest_image)
+    token_img = _current_image_b64.set(latest_image)
+    token_url = _annotated_image_url.set(None)
     try:
-        return ChatResponse(response=run_agent(lc_messages))
+        response_text = run_agent(lc_messages)
+        annotated_image_b64 = None
+
+        image_url = _annotated_image_url.get()
+        logging.info("Annotated image URL: %s", image_url)
+
+        # Strip any lines the LLM included that reference the raw image URL
+        response_text = "\n".join(
+            line for line in response_text.splitlines()
+            if "Annotated image:" not in line
+            and "http://localhost:8080/prediction/" not in line
+            and (not image_url or image_url not in line)
+        ).strip()
+
+        if image_url:
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    img_resp = client.get(image_url)
+                    img_resp.raise_for_status()
+                annotated_image_b64 = base64.b64encode(img_resp.content).decode()
+            except Exception:
+                logging.exception("Failed to fetch annotated image")
+
+        return ChatResponse(response=response_text, annotated_image_base64=annotated_image_b64)
     finally:
-        _current_image_b64.reset(token)
+        _current_image_b64.reset(token_img)
+        _annotated_image_url.reset(token_url)
 
 
 @app.get("/health")
