@@ -72,7 +72,7 @@ TOOLS = {
 llm = init_chat_model(MODEL, temperature=0)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
-def run_agent(history: list) -> str:
+def run_agent(history: list , max_iterations: int = 10) -> str:
     """
     Simple ReAct loop:
       1. Send messages to the LLM.
@@ -81,7 +81,15 @@ def run_agent(history: list) -> str:
     """
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
 
+    iterations = 0
+
+
     while True:
+        iterations += 1
+
+        if iterations > max_iterations:
+            return "Error: Agent exceeded maximum iterations without producing a final answer."
+        
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
 
