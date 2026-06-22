@@ -113,6 +113,17 @@ def run_agent(history: list , max_iterations: int = 10) -> str:
             tool_result = tool_fn.invoke(tool_call)          # returns a ToolMessage
             messages.append(tool_result)
 
+            # LangChain invokes tools in a copied context, so ContextVar.set() inside
+            # the tool is invisible to chat(). Extract the URL from the ToolMessage here,
+            # where we share the same context as the caller.
+            try:
+                payload = json.loads(tool_result.content)
+                image_url = payload.get("annotated_image_url")
+                if image_url:
+                    _annotated_image_url.set(image_url)
+            except Exception:
+                logging.exception("Failed to parse tool result for annotated_image_url")
+
 
 app = FastAPI(title="Vision Agent")
 
@@ -165,11 +176,24 @@ def chat(request: ChatRequest):
         annotated_image_b64 = None
 
         image_url = _annotated_image_url.get()
+        logging.info("Annotated image URL: %s", image_url)
+
+        # Strip any lines the LLM included that reference the raw image URL
+        response_text = "\n".join(
+            line for line in response_text.splitlines()
+            if "Annotated image:" not in line
+            and "http://localhost:8080/prediction/" not in line
+            and (not image_url or image_url not in line)
+        ).strip()
+
         if image_url:
-            with httpx.Client(timeout=10.0) as client:
-                img_resp = client.get(image_url)
-                img_resp.raise_for_status()
-            annotated_image_b64 = base64.b64encode(img_resp.content).decode()
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    img_resp = client.get(image_url)
+                    img_resp.raise_for_status()
+                annotated_image_b64 = base64.b64encode(img_resp.content).decode()
+            except Exception:
+                logging.exception("Failed to fetch annotated image")
 
         return ChatResponse(response=response_text, annotated_image_base64=annotated_image_b64)
     finally:
