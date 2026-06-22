@@ -29,6 +29,13 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {message.content}
             </ReactMarkdown>
+            {message.annotated_image_base64 && (
+              <img
+                src={`data:image/jpeg;base64,${message.annotated_image_base64}`}
+                alt="annotated detection"
+                className="mt-2 max-h-64 rounded-lg object-contain"
+              />
+            )}
           </div>
         )}
       </div>
