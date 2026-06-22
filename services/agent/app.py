@@ -113,6 +113,17 @@ def run_agent(history: list , max_iterations: int = 10) -> str:
             tool_result = tool_fn.invoke(tool_call)          # returns a ToolMessage
             messages.append(tool_result)
 
+            # LangChain runs tools in a copied context, so ContextVar.set() inside
+            # the tool doesn't propagate back. Extract the URL from the tool result
+            # here, where we share the same context as chat().
+            try:
+                payload = json.loads(tool_result.content)
+                image_url = payload.get("annotated_image_url")
+                if image_url:
+                    _annotated_image_url.set(image_url)
+            except Exception:
+                pass
+
 
 app = FastAPI(title="Vision Agent")
 
