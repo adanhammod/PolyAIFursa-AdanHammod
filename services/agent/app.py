@@ -48,17 +48,6 @@ SYSTEM_PROMPT = (
 _current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
 _annotated_image_url: ContextVar[Optional[str]] = ContextVar("annotated_image_url", default=None)
 
-_SHOW_IMAGE_KEYWORDS = {
-    "show image", "show me the image", "show result", "show me the result",
-    "annotated image", "bounding box", "bounding boxes", "detections image",
-    "detection image", "show annotation", "show annotations",
-}
-
-def _user_wants_image(text: str) -> bool:
-    lower = text.lower()
-    return any(kw in lower for kw in _SHOW_IMAGE_KEYWORDS)
-
-
 @tool
 def detect_objects() -> str:
     """Detect and identify objects in the image provided by the user using YOLO object detection."""
@@ -169,23 +158,18 @@ def chat(request: ChatRequest):
         else:
             lc_messages.append(AIMessage(content=msg.content))
 
-    latest_user_text = next(
-        (msg.content for msg in reversed(request.messages) if msg.role == "user"), ""
-    )
-
     token_img = _current_image_b64.set(latest_image)
     token_url = _annotated_image_url.set(None)
     try:
         response_text = run_agent(lc_messages)
         annotated_image_b64 = None
 
-        if _user_wants_image(latest_user_text):
-            image_url = _annotated_image_url.get()
-            if image_url:
-                with httpx.Client(timeout=10.0) as client:
-                    img_resp = client.get(image_url)
-                    img_resp.raise_for_status()
-                annotated_image_b64 = base64.b64encode(img_resp.content).decode()
+        image_url = _annotated_image_url.get()
+        if image_url:
+            with httpx.Client(timeout=10.0) as client:
+                img_resp = client.get(image_url)
+                img_resp.raise_for_status()
+            annotated_image_b64 = base64.b64encode(img_resp.content).decode()
 
         return ChatResponse(response=response_text, annotated_image_base64=annotated_image_b64)
     finally:
