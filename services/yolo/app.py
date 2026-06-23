@@ -5,6 +5,9 @@ from ultralytics import YOLO
 from PIL import Image
 from fastapi import HTTPException
 from contextlib import closing
+from pydantic import BaseModel, field_validator
+from datetime import datetime, timezone
+import json
 
 import sys
 import signal
@@ -16,6 +19,30 @@ import shutil
 import time
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+
+class DetectionObject(BaseModel):
+    id: int
+    label: str
+    score: float
+    box: list[float]
+
+    @field_validator("box", mode="before")
+    @classmethod
+    def parse_box(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+
+class PredictResponse(BaseModel):
+    uid: str
+    timestamp: datetime
+    original_image: str
+    predicted_image: str
+    detection_objects: list[DetectionObject]
+    processing_time_s: float
+
 
 # Disable GPU usage
 import torch
@@ -114,7 +141,7 @@ def save_detection_object(prediction_uid, label, score, box):
 
         conn.commit()
 
-@app.post("/predict")
+@app.post("/predict", response_model=PredictResponse)
 def predict(file: UploadFile = File(...)):
     """
     Predict objects in an image
@@ -143,24 +170,26 @@ def predict(file: UploadFile = File(...)):
     annotated_image.save(predicted_path)
 
     save_prediction_session(uid, original_path, predicted_path)
-    
-    detected_labels = []
-    for box in results[0].boxes:
+
+    detection_objects = []
+    for idx, box in enumerate(results[0].boxes):
         label_idx = int(box.cls[0].item())
         label = model.names[label_idx]
         score = float(box.conf[0])
         bbox = box.xyxy[0].tolist()
         save_detection_object(uid, label, score, bbox)
-        detected_labels.append(label)
+        detection_objects.append(
+            DetectionObject(id=idx, label=label, score=score, box=bbox)
+        )
 
-    processing_time = round(time.time() - start_time, 2)    
-
-    return {
-        "prediction_uid": uid, 
-        "detection_count": len(results[0].boxes),
-        "labels": detected_labels,
-        "time_took": processing_time
-    }
+    return PredictResponse(
+        uid=uid,
+        timestamp=datetime.now(timezone.utc),
+        original_image=original_path,
+        predicted_image=predicted_path,
+        detection_objects=detection_objects,
+        processing_time_s=round(time.time() - start_time, 2),
+    )
 
 # prediction endpoint
 @app.get("/prediction/{uid}")
