@@ -73,10 +73,14 @@ def test_predict_success(client, test_image):
 
     data = response.json()
 
-    assert "prediction_uid" in data
-    assert data["detection_count"] == 1
-    assert data["labels"] == ["person"]
-    assert "time_took" in data
+    assert "uid" in data
+    assert "timestamp" in data
+    assert "original_image" in data
+    assert "predicted_image" in data
+    assert "detection_objects" in data
+    assert len(data["detection_objects"]) == 1
+    assert data["detection_objects"][0]["label"] == "person"
+    assert "processing_time_s" in data
 
 
 def test_predict_rejects_non_image_file(client, tmp_path):
