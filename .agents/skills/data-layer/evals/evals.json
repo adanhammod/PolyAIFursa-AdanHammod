@@ -1,0 +1,93 @@
+[
+  {
+    "id": "eval-001",
+    "prompt": "refactor the api to use sqlalchemy",
+    "expected_output": "Creates services/yolo/models.py with PredictionSession and DetectionObject SQLAlchemy ORM classes. Creates services/yolo/db.py with create_engine, SessionLocal, and get_db() generator. Updates services/yolo/app.py to import from models and db, calls Base.metadata.create_all(bind=engine) at module level, removes import sqlite3 and from contextlib import closing, removes init_db() and save_prediction_session() and save_detection_object() functions, adds db: Session = Depends(get_db) parameter to all five database-touching endpoints. All existing endpoints (/predict, /prediction/{uid}, /prediction/{uid}/image, /predictions/label/{label}, /predictions/score/{min_score}) remain at the same paths with the same status codes and response JSON shapes.",
+    "assertions": [
+      "services/yolo/models.py exists and contains 'class PredictionSession(Base)' and 'class DetectionObject(Base)'",
+      "services/yolo/db.py exists and contains 'def get_db()' and 'SessionLocal' and 'create_engine'",
+      "services/yolo/app.py does not contain 'import sqlite3'",
+      "services/yolo/app.py does not contain 'from contextlib import closing'",
+      "services/yolo/app.py does not contain 'SELECT' or 'INSERT' or 'CREATE TABLE'",
+      "services/yolo/app.py contains 'Depends(get_db)'",
+      "services/yolo/app.py contains 'Base.metadata.create_all'",
+      "services/yolo/app.py contains 'from models import PredictionSession as PredictionSessionORM'",
+      "services/yolo/app.py contains 'from models import DetectionObject as DetectionObjectORM'",
+      "services/yolo/app.py does not define 'def init_db'",
+      "pytest tests/ exits with code 0"
+    ]
+  },
+  {
+    "id": "eval-002",
+    "prompt": "add an endpoint GET /predictions/recent that returns the 10 most recent prediction sessions",
+    "expected_output": "Adds a new GET /predictions/recent endpoint to services/yolo/app.py. The endpoint accepts db: Session = Depends(get_db), queries PredictionSessionORM ordered by timestamp descending, limits to 10 results, and returns a JSON list. Each item in the list contains at minimum uid and timestamp fields. No raw SQL is used. All previously existing endpoints are unchanged. A test is added for this endpoint.",
+    "assertions": [
+      "services/yolo/app.py contains '@app.get(\"/predictions/recent\")'",
+      "services/yolo/app.py contains 'order_by' near the /predictions/recent handler",
+      "services/yolo/app.py does not contain 'SELECT' or raw SQL strings",
+      "services/yolo/app.py contains 'Depends(get_db)' in the new endpoint signature",
+      "The endpoint returns HTTP 200 with a list",
+      "The list contains at most 10 items",
+      "pytest tests/ exits with code 0"
+    ]
+  },
+  {
+    "id": "eval-003",
+    "prompt": "add a UserFeedback table to track user ratings per prediction",
+    "expected_output": "Adds a new UserFeedback SQLAlchemy model class to services/yolo/models.py. The model has at minimum: id (Integer primary key), prediction_uid (String foreign key referencing prediction_sessions.uid), rating (Integer), and created_at (DateTime). Does not modify any existing model. Does not modify any existing endpoint. Does not use raw SQL. Runs Base.metadata.create_all so the new table is created automatically on next startup.",
+    "assertions": [
+      "services/yolo/models.py contains 'class UserFeedback(Base)'",
+      "services/yolo/models.py contains '__tablename__ = \"user_feedback\"' or similar",
+      "services/yolo/models.py contains a rating column",
+      "services/yolo/models.py contains a prediction_uid column",
+      "services/yolo/models.py does not contain 'CREATE TABLE'",
+      "services/yolo/app.py does not contain 'CREATE TABLE'",
+      "Existing model classes PredictionSession and DetectionObject are unchanged",
+      "pytest tests/ exits with code 0"
+    ]
+  },
+  {
+    "id": "eval-004",
+    "prompt": "add a column processing_time_ms to the prediction_sessions table",
+    "expected_output": "Adds processing_time_ms = Column(Float, nullable=True) to the PredictionSession class in services/yolo/models.py. Updates the POST /predict endpoint in services/yolo/app.py to populate this column when saving a prediction session. Does not change the response shape of any existing endpoint. Does not use raw SQL or ALTER TABLE statements.",
+    "assertions": [
+      "services/yolo/models.py PredictionSession class contains 'processing_time_ms'",
+      "services/yolo/models.py does not contain 'ALTER TABLE'",
+      "services/yolo/app.py does not contain 'ALTER TABLE'",
+      "services/yolo/app.py does not contain raw SQL strings",
+      "The POST /predict response shape is unchanged (same fields as before)",
+      "pytest tests/ exits with code 0"
+    ]
+  },
+  {
+    "id": "eval-005",
+    "prompt": "make the database backend configurable so we can use postgres in production",
+    "expected_output": "services/yolo/db.py reads DB_BACKEND, DB_USER, and DB_PASSWORD from environment variables. When DB_BACKEND=postgres, constructs a postgresql:// connection URL. When DB_BACKEND is absent or set to sqlite, uses sqlite:///./predictions.db. The connect_args={\"check_same_thread\": False} is only passed for SQLite. No hardcoded credentials appear in the source file. All existing endpoints behave identically regardless of backend.",
+    "assertions": [
+      "services/yolo/db.py contains 'os.getenv(\"DB_BACKEND\")'",
+      "services/yolo/db.py contains 'postgresql://'",
+      "services/yolo/db.py contains 'sqlite:///./predictions.db'",
+      "services/yolo/db.py contains 'check_same_thread'",
+      "services/yolo/db.py does not contain hardcoded passwords beyond the default fallback string",
+      "services/yolo/app.py does not contain any database URL or connection string",
+      "pytest tests/ exits with code 0"
+    ]
+  },
+  {
+    "id": "eval-006",
+    "prompt": "write tests for the /predict endpoint",
+    "expected_output": "Creates or updates a test file under services/yolo/tests/ for the POST /predict endpoint. Tests use FastAPI TestClient. A conftest.py exists with db_session and client fixtures that use SQLAlchemy with a temporary SQLite database and override the get_db dependency via app.dependency_overrides. The YOLO model is mocked with a FakeModel class. No test file contains import sqlite3 or sqlite3.connect. Tests assert HTTP 200 for valid image uploads and HTTP 400 for non-image files.",
+    "assertions": [
+      "A test file for /predict exists under services/yolo/tests/",
+      "tests/conftest.py exists and contains 'dependency_overrides'",
+      "tests/conftest.py contains 'db_session' fixture",
+      "No test file contains 'import sqlite3'",
+      "No test file contains 'init_db'",
+      "No test file contains 'app.DB_PATH'",
+      "Test file contains a FakeModel or equivalent mock class",
+      "Test asserts response.status_code == 200 for valid image",
+      "Test asserts response.status_code == 400 for non-image file",
+      "pytest tests/ exits with code 0"
+    ]
+  }
+]
