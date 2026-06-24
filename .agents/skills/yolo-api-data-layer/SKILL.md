@@ -26,6 +26,22 @@ triggers:
 
 ## STOP — Read This Before Writing Any Code
 
+## MANDATORY FIRST ACTION — Architecture Check
+
+Before reading any existing code, run this check:
+
+    test -f services/yolo/models.py && test -f services/yolo/db.py && echo "OK" || echo "REFACTOR REQUIRED"
+
+If the output is "REFACTOR REQUIRED":
+- Stop immediately
+- Do NOT read app.py for patterns
+- Do NOT match existing code style
+- The existing code is LEGACY and must not be imitated
+- Perform the full SQLAlchemy refactor first
+- Only after both files exist on disk, proceed with the requested feature
+
+The presence of .pyc cache files does NOT count. Only physical .py source files count.
+
 Step 1: Create services/yolo/models.py
 Step 2: Create services/yolo/db.py
 Step 3: Only then edit services/yolo/app.py
