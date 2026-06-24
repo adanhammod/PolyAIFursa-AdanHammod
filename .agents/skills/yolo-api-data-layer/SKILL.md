@@ -1,3 +1,4 @@
+````markdown
 ---
 name: yolo-api-data-layer
 description: >
@@ -34,19 +35,59 @@ All work happens inside **`services/yolo/`**. Never modify files outside this di
 
 The data layer is split across three files:
 
-| File | Role |
-|------|------|
-| `services/yolo/models.py` | SQLAlchemy ORM models only — no business logic |
-| `services/yolo/db.py` | Engine creation, `SessionLocal`, and `get_db()` dependency |
-| `services/yolo/app.py` | FastAPI endpoints — imports from `models.py` and `db.py` |
+| File                      | Role                                                       |
+| ------------------------- | ---------------------------------------------------------- |
+| `services/yolo/models.py` | SQLAlchemy ORM models only — no business logic             |
+| `services/yolo/db.py`     | Engine creation, `SessionLocal`, and `get_db()` dependency |
+| `services/yolo/app.py`    | FastAPI endpoints — imports from `models.py` and `db.py`   |
+
+## Mandatory architecture requirements
+
+The SQLAlchemy data layer MUST be separated from the FastAPI application code.
+
+You MUST create and use these files:
+
+- `services/yolo/models.py`
+- `services/yolo/db.py`
+
+Hard rules:
+
+- Do NOT define SQLAlchemy ORM model classes inside `services/yolo/app.py`.
+- Do NOT define `Base = declarative_base()` inside `services/yolo/app.py`.
+- Do NOT define `create_engine()` inside `services/yolo/app.py`.
+- Do NOT define `SessionLocal` inside `services/yolo/app.py`.
+- Do NOT define `get_db()` inside `services/yolo/app.py`.
+- Do NOT keep, rewrite, or call `init_db()`.
+- Do NOT create model names like `DBPredictionSession` or `DBDetectionObject`.
+
+The only valid ORM model class names are:
+
+```python
+PredictionSession
+DetectionObject
+```
+````
+
+In `app.py`, import them only with aliases:
+
+```python
+from models import PredictionSession as PredictionSessionORM
+from models import DetectionObject as DetectionObjectORM
+```
+
+Never import ORM models without aliases.
+
+A solution is incomplete if either `services/yolo/models.py` or `services/yolo/db.py` does not exist.
 
 ## Rules — follow these exactly
 
 ### 1. ORM only — no raw SQL
+
 - Never use `import sqlite3`, `conn.execute(...)`, or raw SQL strings anywhere.
 - All database reads and writes must go through SQLAlchemy ORM queries.
 
 ### 2. Models go in `models.py`
+
 Define all ORM models in `services/yolo/models.py`. Use `declarative_base()` from `sqlalchemy.orm`:
 
 ```python
@@ -122,40 +163,80 @@ def get_prediction_by_uid(uid: str, db: Session = Depends(get_db)):
     ...
 ```
 
-Never call `get_db()` manually inside an endpoint. Never open a `SessionLocal()` directly inside an endpoint.
+Never call `get_db()` manually inside an endpoint.
+
+Never open a `SessionLocal()` directly inside an endpoint.
 
 ### 5. Naming conflict — always alias ORM imports in `app.py`
 
-`app.py` already contains a **Pydantic** model named `DetectionObject`. The SQLAlchemy model in `models.py` has the same name. Always alias the ORM imports to avoid the collision:
+`app.py` already contains a Pydantic model named `DetectionObject`.
+
+The SQLAlchemy model in `models.py` has the same class name.
+
+Always alias ORM imports to avoid naming collisions:
 
 ```python
 from models import PredictionSession as PredictionSessionORM
 from models import DetectionObject as DetectionObjectORM
 ```
 
-Use `PredictionSessionORM` and `DetectionObjectORM` throughout `app.py`. Never rename the Pydantic `DetectionObject` class.
+Use:
+
+- `PredictionSessionORM` for SQLAlchemy database operations
+- `DetectionObjectORM` for SQLAlchemy database operations
+
+Keep existing Pydantic model names unchanged.
+
+Never rename the Pydantic `DetectionObject` model.
+
+Never import ORM models without aliases.
 
 ### 6. Table creation replaces `init_db()`
 
-Tables are created automatically at startup. Place this call at module level in `app.py`, after importing `Base` and `engine`:
+Delete `init_db()` completely.
+
+Do not redefine it.
+
+Do not rewrite it.
+
+Do not call it from tests.
+
+Do not keep it for backward compatibility.
+
+Tables are created automatically at startup.
+
+Place this call at module level in `app.py`, after importing `Base` and `engine`:
 
 ```python
 from db import get_db, engine
 from models import Base
+
 Base.metadata.create_all(bind=engine)
 ```
 
-Do not define or call `init_db()`.
+`init_db()` must not exist anywhere in the final solution.
 
 ### 7. Preserve all existing endpoints
 
-All existing endpoint paths, HTTP methods, status codes, and response JSON shapes must remain exactly the same after any change. Do not rename keys, change types, or add/remove fields from existing responses.
+All existing endpoint paths, HTTP methods, status codes, and response JSON shapes must remain exactly the same after any change.
+
+Do not rename keys.
+
+Do not change types.
+
+Do not add fields.
+
+Do not remove fields.
 
 ## Writing tests
 
 ### Test database setup
 
-Use a temporary SQLite file per test. Override the `get_db` dependency so the app uses the test session — never patch `app.DB_PATH` (it does not exist):
+Use a temporary SQLite file per test.
+
+Override the `get_db` dependency so the app uses the test session.
+
+Never patch `app.DB_PATH`.
 
 ```python
 # tests/conftest.py
@@ -183,23 +264,38 @@ def db_session(tmp_path):
 def client(db_session):
     def override():
         yield db_session
+
     app.dependency_overrides[get_db] = override
+
     with TestClient(app) as c:
         yield c
+
     app.dependency_overrides.clear()
 ```
 
 ### Inserting test data
 
-Use ORM model instances and `db_session` directly in fixtures or test functions:
+Use ORM model instances and `db_session` directly.
 
 ```python
-from models import PredictionSession as PredictionSessionORM, DetectionObject as DetectionObjectORM
+from models import PredictionSession as PredictionSessionORM
+from models import DetectionObject as DetectionObjectORM
 
 @pytest.fixture(autouse=True)
 def seed_db(db_session):
-    session = PredictionSessionORM(uid="abc-123", original_image="o.jpg", predicted_image="p.jpg")
-    obj = DetectionObjectORM(prediction_uid="abc-123", label="person", score=0.91, box="[10,20,100,200]")
+    session = PredictionSessionORM(
+        uid="abc-123",
+        original_image="o.jpg",
+        predicted_image="p.jpg"
+    )
+
+    obj = DetectionObjectORM(
+        prediction_uid="abc-123",
+        label="person",
+        score=0.91,
+        box="[10,20,100,200]"
+    )
+
     db_session.add_all([session, obj])
     db_session.commit()
 ```
@@ -208,43 +304,41 @@ Never use `sqlite3.connect()` in tests.
 
 ### Mocking the YOLO model
 
-For endpoints that call the YOLO model (e.g. `POST /predict`), patch `app.model` with a fake:
-
-```python
-class FakeBox:
-    cls = [type("FakeValue", (), {"item": lambda self: 0})()]
-    conf = [0.91]
-    xyxy = [type("FakeXYXY", (), {"tolist": lambda self: [10, 20, 100, 200]})()]
-
-class FakeResult:
-    boxes = [FakeBox()]
-    def plot(self):
-        import numpy as np
-        return np.zeros((100, 100, 3), dtype=np.uint8)
-
-class FakeModel:
-    names = {0: "person"}
-    def __call__(self, *args, **kwargs):
-        return [FakeResult()]
-
-@pytest.fixture(autouse=True)
-def setup_files(tmp_path, monkeypatch):
-    upload_dir = tmp_path / "original"
-    predicted_dir = tmp_path / "predicted"
-    upload_dir.mkdir()
-    predicted_dir.mkdir()
-    monkeypatch.setattr("app.UPLOAD_DIR", str(upload_dir))
-    monkeypatch.setattr("app.PREDICTED_DIR", str(predicted_dir))
-    monkeypatch.setattr("app.model", FakeModel())
-```
+For endpoints that call the YOLO model (e.g. `POST /predict`), patch `app.model` with a fake implementation.
 
 ## Verification — required before completion
 
-Before declaring the task done, you MUST run:
+Before declaring the task done, verify the required files exist:
+
+```bash
+test -f services/yolo/models.py
+test -f services/yolo/db.py
+```
+
+Verify invalid patterns do not exist:
+
+```bash
+! grep -R "import sqlite3" services/yolo
+! grep -R "from contextlib import closing" services/yolo
+! grep -R "class DBPredictionSession" services/yolo
+! grep -R "class DBDetectionObject" services/yolo
+! grep -R "create_engine" services/yolo/app.py
+! grep -R "SessionLocal" services/yolo/app.py
+! grep -R "def get_db" services/yolo/app.py
+! grep -R "def init_db" services/yolo
+```
+
+Then run:
 
 ```bash
 cd services/yolo
 pytest tests/ -v
 ```
 
-All tests must pass. If any test fails, fix the issue and re-run. Do not claim success until `pytest` exits with code 0.
+All tests must pass.
+
+If any required file is missing, any invalid pattern exists, or any test fails, the task is not complete.
+
+```
+
+```
