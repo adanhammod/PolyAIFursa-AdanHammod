@@ -23,7 +23,6 @@ triggers:
   - "database layer"
   - "sqlalchemy"
 ---
-
 # YOLO API Data Layer Skill
 
 ## Service location
@@ -34,11 +33,11 @@ All work happens inside **`services/yolo/`**. Never modify files outside this di
 
 The data layer is split across three files:
 
-| File                      | Role                                                      |
-| ------------------------- | --------------------------------------------------------- |
-| `services/yolo/models.py` | SQLAlchemy ORM models only — no business logic            |
+| File                        | Role                                                          |
+| --------------------------- | ------------------------------------------------------------- |
+| `services/yolo/models.py` | SQLAlchemy ORM models only — no business logic               |
 | `services/yolo/db.py`     | Engine creation,`SessionLocal`, and `get_db()` dependency |
-| `services/yolo/app.py`    | FastAPI endpoints — imports from `models.py` and `db.py`  |
+| `services/yolo/app.py`    | FastAPI endpoints — imports from `models.py` and `db.py` |
 
 ## Mandatory architecture requirements
 
@@ -81,7 +80,7 @@ from models import DetectionObject as DetectionObjectORM
 
 Never import ORM models without aliases.
 
-A solution is incomplete if either `services/yolo/models.py` or `services/yolo/db.py` does not exist.
+* [ ] A solution is incomplete if either `services/yolo/models.py` or `services/yolo/db.py` does not exist.
 
 ## Rules — follow these exactly
 
@@ -404,6 +403,21 @@ The database backend must switch using:
 - DB_PASSWORD
 
 No code changes should be required when switching backends.
+
+The refactor is invalid if:
+
+- ORM models remain inside app.py
+- create_engine() remains inside app.py
+- SessionLocal remains inside app.py
+- get_db() remains inside app.py
+- init_db() exists anywhere in the repository
+
+The agent MUST physically create:
+
+- services/yolo/models.py
+- services/yolo/db.py
+
+Moving code within app.py is not considered a valid refactor.
 
 ### Required database configuration format
 

@@ -33,7 +33,15 @@
       "No test file contains 'sqlite3.connect'",
       "No test file contains 'init_db'",
       "No test file contains 'app.DB_PATH'",
-      "pytest tests/ exits with code 0"
+      "pytest tests/ exits with code 0",
+      "services/yolo/models.py exists",
+      "services/yolo/db.py exists",
+      "services/yolo/app.py does not contain 'class PredictionSessionModel'",
+      "services/yolo/app.py does not contain 'class DetectionObjectModel'",
+      "services/yolo/app.py does not contain 'create_engine'",
+      "services/yolo/app.py does not contain 'SessionLocal'",
+      "services/yolo/app.py does not contain 'def get_db'",
+      "services/yolo/app.py does not contain 'def init_db'"
     ]
   },
   {
