@@ -169,7 +169,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 from db import get_db
 
-@app.get("/prediction/{uid}")
+@app.get("/predictions/{uid}")
 def get_prediction_by_uid(uid: str, db: Session = Depends(get_db)):
     session = db.query(PredictionSessionORM).filter_by(uid=uid).first()
     ...
@@ -239,6 +239,18 @@ Do not change types.
 Do not add fields.
 
 Do not remove fields.
+
+Do not rename any existing endpoint path.
+
+For example:
+
+- /predict
+- /prediction/{uid}
+- /prediction/{uid}/image
+- /predictions/label/{label}
+- /predictions/score/{min_score}
+
+must remain unchanged.
 
 ## Writing tests
 
@@ -369,3 +381,41 @@ pytest tests/ -v
 All tests must pass.
 
 If any required file is missing, any invalid pattern exists, or any test fails, the task is not complete.
+
+The task is not complete until the agent reports:
+
+- pytest tests/ exited with code 0
+- services/yolo/models.py exists
+- services/yolo/db.py exists
+
+The final response must include the pytest result.
+
+### PostgreSQL verification
+
+The final solution must support both:
+
+- SQLite
+- PostgreSQL
+
+The database backend must switch using:
+
+- DB_BACKEND
+- DB_USER
+- DB_PASSWORD
+
+No code changes should be required when switching backends.
+
+### Required database configuration format
+
+The application must support two database backends:
+
+1. SQLite by default
+2. PostgreSQL when explicitly configured
+
+Default behavior:
+
+If no environment variables are set, the application MUST use SQLite:
+
+```python
+DB_BACKEND = os.getenv("DB_BACKEND", "sqlite")
+```
