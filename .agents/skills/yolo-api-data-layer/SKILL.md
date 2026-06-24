@@ -37,6 +37,25 @@ Modifying app.py is not a substitute for creating these files.
 
 ---
 
+## BEFORE ADDING ANY ENDPOINT — Check Architecture First
+
+Before writing any new endpoint that touches the database:
+
+1. Check if services/yolo/models.py exists
+2. Check if services/yolo/db.py exists
+
+If either file is missing:
+- Do NOT add the endpoint using raw SQL or sqlite3
+- Do NOT match the existing code style if it uses sqlite3
+- STOP and perform the full data layer refactor first (create models.py,
+  create db.py, rewrite app.py to use ORM)
+- Only then add the new endpoint using Depends(get_db) and ORM queries
+
+A new endpoint added on top of raw sqlite3 code is invalid even if
+its tests pass.
+
+---
+
 # YOLO API Data Layer Skill
 
 ## DO THIS FIRST — Mandatory Three-File Split
