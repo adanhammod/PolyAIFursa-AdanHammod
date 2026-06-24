@@ -22,6 +22,14 @@ triggers:
   - "database layer"
   - "sqlalchemy"
   - "make the database backend configurable"
+  - "write tests"
+  - "add tests"
+  - "test the"
+  - "fix the architecture"
+  - "architectural design"
+  - "delete a prediction"
+  - "database backend configurable"
+  - "use postgres"
 ---
 
 ## STOP — Read This Before Writing Any Code
