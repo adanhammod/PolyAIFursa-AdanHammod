@@ -318,6 +318,25 @@ Never use `sqlite3.connect()` in tests.
 
 For endpoints that call the YOLO model, such as `POST /predict`, patch `app.model` with a fake implementation.
 
+## Existing tests must be refactored
+
+Do not preserve old test patterns if they depend on the old SQLite implementation.
+
+Existing tests that patch `app.DB_PATH`, call `init_db()`, or use `sqlite3.connect()` must be rewritten.
+
+Tests must use:
+
+- `tests/conftest.py`
+- `app.dependency_overrides[get_db]`
+- temporary SQLite SQLAlchemy engine
+- ORM model instances for seeding data
+
+The refactor is invalid if tests still depend on:
+
+- `app.DB_PATH`
+- `init_db()`
+- `sqlite3.connect()`
+
 ## Verification — required before completion
 
 Before declaring the task done, verify the required files exist:
