@@ -1,4 +1,4 @@
----
+﻿---
 name: yolo-api-data-layer
 description: >
   Activate for any task that touches the YOLO service database layer:
@@ -22,6 +22,19 @@ triggers:
   - "database layer"
   - "sqlalchemy"
   - "make the database backend configurable"
+---
+
+## STOP — Read This Before Writing Any Code
+
+Step 1: Create services/yolo/models.py
+Step 2: Create services/yolo/db.py
+Step 3: Only then edit services/yolo/app.py
+
+If you edit app.py before both files exist on disk, you have failed.
+If models.py does not exist when you finish, you have failed.
+If db.py does not exist when you finish, you have failed.
+Modifying app.py is not a substitute for creating these files.
+
 ---
 
 # YOLO API Data Layer Skill
