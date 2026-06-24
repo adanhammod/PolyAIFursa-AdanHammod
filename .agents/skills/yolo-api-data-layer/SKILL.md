@@ -1,4 +1,3 @@
-````markdown
 ---
 name: yolo-api-data-layer
 description: >
@@ -35,11 +34,11 @@ All work happens inside **`services/yolo/`**. Never modify files outside this di
 
 The data layer is split across three files:
 
-| File                      | Role                                                       |
-| ------------------------- | ---------------------------------------------------------- |
-| `services/yolo/models.py` | SQLAlchemy ORM models only — no business logic             |
-| `services/yolo/db.py`     | Engine creation, `SessionLocal`, and `get_db()` dependency |
-| `services/yolo/app.py`    | FastAPI endpoints — imports from `models.py` and `db.py`   |
+| File                      | Role                                                      |
+| ------------------------- | --------------------------------------------------------- |
+| `services/yolo/models.py` | SQLAlchemy ORM models only — no business logic            |
+| `services/yolo/db.py`     | Engine creation,`SessionLocal`, and `get_db()` dependency |
+| `services/yolo/app.py`    | FastAPI endpoints — imports from `models.py` and `db.py`  |
 
 ## Mandatory architecture requirements
 
@@ -49,6 +48,12 @@ You MUST create and use these files:
 
 - `services/yolo/models.py`
 - `services/yolo/db.py`
+
+These files must be created as physical files in the repository.
+
+Creating ORM models inside `app.py` instead of creating `models.py` is invalid.
+
+Creating database connection code inside `app.py` instead of creating `db.py` is invalid.
 
 Hard rules:
 
@@ -66,7 +71,6 @@ The only valid ORM model class names are:
 PredictionSession
 DetectionObject
 ```
-````
 
 In `app.py`, import them only with aliases:
 
@@ -113,6 +117,10 @@ class DetectionObject(Base):
     box = Column(String)
 ```
 
+No SQLAlchemy ORM model class may exist inside `app.py`.
+
+The only valid location for ORM models is `services/yolo/models.py`.
+
 When adding a new table, add a new class to this file. When adding a column, add a new `Column(...)` to the relevant class.
 
 ### 3. Database connection goes in `db.py`
@@ -147,6 +155,10 @@ def get_db():
     finally:
         db.close()
 ```
+
+No `create_engine()`, `SessionLocal`, or `get_db()` implementation may exist inside `app.py`.
+
+The only valid location for database connection code is `services/yolo/db.py`.
 
 ### 4. Endpoints use `Depends(get_db)`
 
@@ -304,7 +316,7 @@ Never use `sqlite3.connect()` in tests.
 
 ### Mocking the YOLO model
 
-For endpoints that call the YOLO model (e.g. `POST /predict`), patch `app.model` with a fake implementation.
+For endpoints that call the YOLO model, such as `POST /predict`, patch `app.model` with a fake implementation.
 
 ## Verification — required before completion
 
@@ -338,7 +350,3 @@ pytest tests/ -v
 All tests must pass.
 
 If any required file is missing, any invalid pattern exists, or any test fails, the task is not complete.
-
-```
-
-```
