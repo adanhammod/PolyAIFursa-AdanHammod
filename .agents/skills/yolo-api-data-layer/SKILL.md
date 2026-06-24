@@ -37,10 +37,8 @@ If the output is "REFACTOR REQUIRED":
 - Do NOT read app.py for patterns
 - Do NOT match existing code style
 - The existing code is LEGACY and must not be imitated
-- Perform the full SQLAlchemy refactor first
+- Perform the full SQLAlchemy refactor first (see Task: Full data-layer refactor in this skill)
 - Only after both files exist on disk, proceed with the requested feature
-
-The presence of .pyc cache files does NOT count. Only physical .py source files count.
 
 Step 1: Create services/yolo/models.py
 Step 2: Create services/yolo/db.py
