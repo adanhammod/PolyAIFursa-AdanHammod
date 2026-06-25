@@ -80,9 +80,16 @@ TOOLS = {
 }
 
 llm = init_chat_model(MODEL, temperature=0)
+
+if not llm.profile.get("tool_calling"):
+    raise SystemExit(
+        f"[ERROR] Model '{MODEL}' does not support tool calling, "
+        "which is required by this agent."
+    )
+
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
-def run_agent(history: list , max_iterations: int = 10) -> str:
+def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
     """
     Simple ReAct loop:
       1. Send messages to the LLM.
@@ -90,22 +97,26 @@ def run_agent(history: list , max_iterations: int = 10) -> str:
       3. Repeat until the LLM returns a plain text response.
     """
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
-
+    tokens = {"input": 0, "output": 0, "total": 0}
     iterations = 0
-
 
     while True:
         iterations += 1
 
         if iterations > max_iterations:
-            return "Error: Agent exceeded maximum iterations without producing a final answer."
-        
+            return "Error: Agent exceeded maximum iterations without producing a final answer.", tokens
+
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
 
+        meta = response.usage_metadata or {}
+        tokens["input"]  += meta.get("input_tokens", 0)
+        tokens["output"] += meta.get("output_tokens", 0)
+        tokens["total"]  += meta.get("total_tokens", 0)
+
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
-            return response.content
+            return response.content, tokens
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
@@ -151,6 +162,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     annotated_image_base64: Optional[str] = None
+    tokens_used: dict  # {"input": int, "output": int, "total": int}
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -172,7 +184,7 @@ def chat(request: ChatRequest):
     token_img = _current_image_b64.set(latest_image)
     token_url = _annotated_image_url.set(None)
     try:
-        response_text = run_agent(lc_messages)
+        response_text, tokens_used = run_agent(lc_messages)
         annotated_image_b64 = None
 
         image_url = _annotated_image_url.get()
@@ -195,7 +207,7 @@ def chat(request: ChatRequest):
             except Exception:
                 logging.exception("Failed to fetch annotated image")
 
-        return ChatResponse(response=response_text, annotated_image_base64=annotated_image_b64)
+        return ChatResponse(response=response_text, annotated_image_base64=annotated_image_b64, tokens_used=tokens_used)
     finally:
         _current_image_b64.reset(token_img)
         _annotated_image_url.reset(token_url)
