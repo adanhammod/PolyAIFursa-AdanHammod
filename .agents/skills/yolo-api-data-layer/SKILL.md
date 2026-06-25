@@ -30,6 +30,11 @@ triggers:
   - "delete a prediction"
   - "database backend configurable"
   - "use postgres"
+  - "remove a prediction"
+  - "remove prediction session"
+  - "delete session"
+  - "delete by uid"
+  - "delete all detection objects"
 ---
 
 ## STOP — Read This Before Writing Any Code
@@ -41,6 +46,7 @@ Before reading any existing code, run this check:
     test -f services/yolo/models.py && test -f services/yolo/db.py && echo "OK" || echo "REFACTOR REQUIRED"
 
 If the output is "REFACTOR REQUIRED":
+
 - Stop immediately
 - Do NOT read app.py for patterns
 - Do NOT match existing code style
@@ -67,6 +73,7 @@ Before writing any new endpoint that touches the database:
 2. Check if services/yolo/db.py exists
 
 If either file is missing:
+
 - Do NOT add the endpoint using raw SQL or sqlite3
 - Do NOT match the existing code style if it uses sqlite3
 - STOP and perform the full data layer refactor first (create models.py,
@@ -134,11 +141,11 @@ changes also touch the database layer.
 
 The data layer is split across exactly three files:
 
-| File                      | Responsibility                                              |
-|---------------------------|-------------------------------------------------------------|
-| `services/yolo/models.py` | SQLAlchemy ORM model definitions only — no business logic  |
-| `services/yolo/db.py`     | Engine, SessionLocal, and get_db() — no models             |
-| `services/yolo/app.py`    | FastAPI routes — imports from models.py and db.py          |
+| File                      | Responsibility                                            |
+| ------------------------- | --------------------------------------------------------- |
+| `services/yolo/models.py` | SQLAlchemy ORM model definitions only — no business logic |
+| `services/yolo/db.py`     | Engine, SessionLocal, and get_db() — no models            |
+| `services/yolo/app.py`    | FastAPI routes — imports from models.py and db.py         |
 
 ### Absolute prohibitions in `app.py`
 
@@ -260,6 +267,7 @@ def get_db():
 ```
 
 Environment variables:
+
 - `DB_BACKEND` — `"sqlite"` (default) or `"postgres"`
 - `DB_USER` — PostgreSQL username
 - `DB_PASSWORD` — PostgreSQL password
@@ -613,6 +621,7 @@ All tests must pass (exit code 0). The task is not complete until this is confir
 ### Example 1 — "refactor the api to use sqlalchemy"
 
 The agent must:
+
 - Create `models.py` and `db.py` as physical files
 - Strip all ORM and DB connection code from `app.py`
 - Add aliased imports and `Base.metadata.create_all(bind=engine)`
@@ -620,6 +629,7 @@ The agent must:
 - Confirm `pytest tests/ -v` exits with code 0
 
 The agent must **not**:
+
 - Leave any ORM class definition in `app.py`
 - Keep `init_db()` anywhere
 - Preserve old test patterns that call `init_db()` or patch `app.DB_PATH`
@@ -629,6 +639,7 @@ The agent must **not**:
 ### Example 2 — "add a UserFeedback table to track user ratings per prediction"
 
 The agent must:
+
 - Add `UserFeedback(Base)` to `models.py` with at minimum:
   `id`, `prediction_uid` (FK), `rating` (Integer), `created_at` (DateTime)
 - Not modify any existing endpoint
@@ -641,6 +652,7 @@ The agent must:
 ### Example 3 — "add an endpoint GET /predictions/recent"
 
 The agent must:
+
 - Add `@app.get("/predictions/recent")` to `app.py`
 - Use `db: Session = Depends(get_db)` in the signature
 - Query `PredictionSessionORM` ordered by `timestamp` descending, limited to 10
@@ -654,6 +666,7 @@ The agent must:
 ### Example 4 — "add a processing_time_ms column to the predictions table"
 
 The agent must:
+
 - Add `processing_time_ms = Column(Float, nullable=True)` to `PredictionSession` in `models.py`
 - Update `POST /predict` in `app.py` to populate the column when saving
 - Not change the `PredictResponse` schema (field is internal storage only unless asked)
@@ -665,6 +678,7 @@ The agent must:
 ### Example 5 — "write tests for the /predict endpoint"
 
 The agent must:
+
 - Ensure `tests/conftest.py` exists with `db_session` and `client` fixtures
 - Add `FakeModel`, `FakeBox`, `FakeResult` mock classes
 - Wire the model mock via `monkeypatch.setattr("app.model", FakeModel())`
