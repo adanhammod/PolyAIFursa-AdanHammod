@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
@@ -79,7 +80,17 @@ TOOLS = {
     detect_objects.name: detect_objects
 }
 
-llm = init_chat_model(MODEL, temperature=0)
+rate_limiter = InMemoryRateLimiter(
+    requests_per_second=0.5,
+    check_every_n_seconds=0.1,
+    max_bucket_size=10,
+)
+
+llm = init_chat_model(
+    MODEL,
+    temperature=0,
+    rate_limiter=rate_limiter,
+)
 
 if not llm.profile.get("tool_calling"):
     raise SystemExit(
