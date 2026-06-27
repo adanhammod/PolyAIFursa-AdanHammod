@@ -123,7 +123,7 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
         if iterations > max_iterations:
             return (
                 "Error: Agent exceeded maximum iterations without producing a final answer.",
-                total_tokens,
+                tokens,
             )
 
         response: AIMessage = llm_with_tools.invoke(messages)
