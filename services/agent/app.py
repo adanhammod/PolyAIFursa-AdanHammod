@@ -104,10 +104,7 @@ if not llm.profile.get("tool_calling"):
 
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
-<<<<<<< HEAD
-=======
 
->>>>>>> feature/agent-test
 def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
     """
     Simple ReAct loop:
@@ -117,49 +114,29 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
     Returns (response_text, token_counts) where token_counts has "input", "output", "total" keys.
     """
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
-<<<<<<< HEAD
     tokens = {"input": 0, "output": 0, "total": 0}
     iterations = 0
-=======
-    iterations = 0
-    total_tokens: dict = {"input": 0, "output": 0, "total": 0}
->>>>>>> feature/agent-test
 
     while True:
         iterations += 1
 
         if iterations > max_iterations:
-<<<<<<< HEAD
-            return "Error: Agent exceeded maximum iterations without producing a final answer.", tokens
-=======
             return (
                 "Error: Agent exceeded maximum iterations without producing a final answer.",
                 total_tokens,
             )
->>>>>>> feature/agent-test
 
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
 
-<<<<<<< HEAD
         meta = response.usage_metadata or {}
-        tokens["input"]  += meta.get("input_tokens", 0)
+        tokens["input"] += meta.get("input_tokens", 0)
         tokens["output"] += meta.get("output_tokens", 0)
-        tokens["total"]  += meta.get("total_tokens", 0)
+        tokens["total"] += meta.get("total_tokens", 0)
 
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
             return response.content, tokens
-=======
-        if response.usage_metadata:
-            total_tokens["input"] += response.usage_metadata.get("input_tokens", 0)
-            total_tokens["output"] += response.usage_metadata.get("output_tokens", 0)
-            total_tokens["total"] += response.usage_metadata.get("total_tokens", 0)
-
-        # No tool calls, the model produced its final answer
-        if not response.tool_calls:
-            return response.content, total_tokens
->>>>>>> feature/agent-test
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
