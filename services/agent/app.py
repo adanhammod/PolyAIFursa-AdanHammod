@@ -3,8 +3,11 @@ import io
 import json
 import logging
 import os
+import uuid
 from contextvars import ContextVar
 from typing import Optional
+
+import boto3
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -45,8 +48,12 @@ SYSTEM_PROMPT = (
     "Use the available tools to extract information from images. "
 )
 
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET")
+s3_client = boto3.client("s3", region_name=AWS_REGION)
+
 _current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
-_annotated_image_url: ContextVar[Optional[str]] = ContextVar("annotated_image_url", default=None)
+_annotated_image_s3_key: ContextVar[Optional[str]] = ContextVar("annotated_image_s3_key", default=None)
 
 @tool
 def detect_objects() -> str:
@@ -56,20 +63,20 @@ def detect_objects() -> str:
         return json.dumps({"error": "No image was provided by the user."})
 
     image_bytes = base64.b64decode(image_b64)
+    original_key = f"originals/{uuid.uuid4()}.jpg"
+    s3_client.upload_fileobj(io.BytesIO(image_bytes), AWS_S3_BUCKET, original_key)
+
     with httpx.Client(timeout=30.0) as client:
         response = client.post(
             f"{YOLO_SERVICE_URL}/predict",
-            files={"file": ("image.jpg", io.BytesIO(image_bytes), "image/jpeg")},
+            json={"image_s3_key": original_key},
         )
         response.raise_for_status()
 
     result = response.json()
-    prediction_uid = result.get("prediction_uid")
-
-    if prediction_uid:
-        url = f"{YOLO_SERVICE_URL}/prediction/{prediction_uid}/image"
-        result["annotated_image_url"] = url
-        _annotated_image_url.set(url)
+    annotated_key = result.get("annotated_image_s3_key")
+    if annotated_key:
+        _annotated_image_s3_key.set(annotated_key)
 
     return json.dumps(result)
 
@@ -114,15 +121,15 @@ def run_agent(history: list , max_iterations: int = 10) -> str:
             messages.append(tool_result)
 
             # LangChain invokes tools in a copied context, so ContextVar.set() inside
-            # the tool is invisible to chat(). Extract the URL from the ToolMessage here,
+            # the tool is invisible to chat(). Extract the key from the ToolMessage here,
             # where we share the same context as the caller.
             try:
                 payload = json.loads(tool_result.content)
-                image_url = payload.get("annotated_image_url")
-                if image_url:
-                    _annotated_image_url.set(image_url)
+                annotated_key = payload.get("annotated_image_s3_key")
+                if annotated_key:
+                    _annotated_image_s3_key.set(annotated_key)
             except Exception:
-                logging.exception("Failed to parse tool result for annotated_image_url")
+                logging.exception("Failed to parse tool result for annotated_image_s3_key")
 
 
 app = FastAPI(title="Vision Agent")
@@ -170,35 +177,33 @@ def chat(request: ChatRequest):
             lc_messages.append(AIMessage(content=msg.content))
 
     token_img = _current_image_b64.set(latest_image)
-    token_url = _annotated_image_url.set(None)
+    token_key = _annotated_image_s3_key.set(None)
     try:
         response_text = run_agent(lc_messages)
         annotated_image_b64 = None
 
-        image_url = _annotated_image_url.get()
-        logging.info("Annotated image URL: %s", image_url)
+        annotated_key = _annotated_image_s3_key.get()
+        logging.info("Annotated image S3 key: %s", annotated_key)
 
-        # Strip any lines the LLM included that reference the raw image URL
         response_text = "\n".join(
             line for line in response_text.splitlines()
             if "Annotated image:" not in line
             and "http://localhost:8080/prediction/" not in line
-            and (not image_url or image_url not in line)
+            and (not annotated_key or annotated_key not in line)
         ).strip()
 
-        if image_url:
+        if annotated_key:
             try:
-                with httpx.Client(timeout=10.0) as client:
-                    img_resp = client.get(image_url)
-                    img_resp.raise_for_status()
-                annotated_image_b64 = base64.b64encode(img_resp.content).decode()
+                buf = io.BytesIO()
+                s3_client.download_fileobj(AWS_S3_BUCKET, annotated_key, buf)
+                annotated_image_b64 = base64.b64encode(buf.getvalue()).decode()
             except Exception:
-                logging.exception("Failed to fetch annotated image")
+                logging.exception("Failed to fetch annotated image from S3")
 
         return ChatResponse(response=response_text, annotated_image_base64=annotated_image_b64)
     finally:
         _current_image_b64.reset(token_img)
-        _annotated_image_url.reset(token_url)
+        _annotated_image_s3_key.reset(token_key)
 
 
 @app.get("/health")
