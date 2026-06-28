@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from prometheus_fastapi_instrumentator import Instrumentator
 from ultralytics import YOLO
@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from contextlib import closing
 from pydantic import BaseModel, field_validator
 from datetime import datetime, timezone
+from typing import Optional
 import json
 
 import sys
@@ -15,8 +16,8 @@ import sqlite3
 import logging
 import os
 import uuid
-import shutil
 import time
+import boto3
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -35,11 +36,16 @@ class DetectionObject(BaseModel):
         return v
 
 
+class PredictRequest(BaseModel):
+    image_s3_key: str
+
+
 class PredictResponse(BaseModel):
     uid: str
     timestamp: datetime
     original_image: str
     predicted_image: str
+    annotated_image_s3_key: Optional[str] = None
     detection_objects: list[DetectionObject]
     processing_time_s: float
 
@@ -73,6 +79,10 @@ if _raw_threshold is not None:
 else:
     CONFIDENCE_THRESHOLD = 0.5
     logging.info(f"CONFIDENCE_THRESHOLD not set, using default: {CONFIDENCE_THRESHOLD}")
+
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET")
+s3_client = boto3.client("s3", region_name=AWS_REGION)
 
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
@@ -142,32 +152,25 @@ def save_detection_object(prediction_uid, label, score, box):
         conn.commit()
 
 @app.post("/predict", response_model=PredictResponse)
-def predict(file: UploadFile = File(...)):
-    """
-    Predict objects in an image
-    """
+def predict(request: PredictRequest):
     start_time = time.time()
-    allowed_extensions = (".jpg", ".jpeg", ".png")
 
-    if not file.filename.lower().endswith(allowed_extensions):
-        raise HTTPException(
-            status_code=400,
-            detail="Only image files are supported"
-        )
-
-    ext = os.path.splitext(file.filename)[1]
     uid = str(uuid.uuid4())
-    original_path = os.path.join(UPLOAD_DIR, uid + ext)
-    predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
+    original_path = os.path.join(UPLOAD_DIR, uid + ".jpg")
+    predicted_path = os.path.join(PREDICTED_DIR, uid + ".jpg")
 
     with open(original_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        s3_client.download_fileobj(AWS_S3_BUCKET, request.image_s3_key, f)
 
     results = model(original_path, device="cpu", conf=CONFIDENCE_THRESHOLD)
 
-    annotated_frame = results[0].plot()  # NumPy image with boxes
+    annotated_frame = results[0].plot()
     annotated_image = Image.fromarray(annotated_frame)
     annotated_image.save(predicted_path)
+
+    annotated_key = f"predicted/{uid}.jpg"
+    with open(predicted_path, "rb") as f:
+        s3_client.upload_fileobj(f, AWS_S3_BUCKET, annotated_key)
 
     save_prediction_session(uid, original_path, predicted_path)
 
@@ -178,15 +181,14 @@ def predict(file: UploadFile = File(...)):
         score = float(box.conf[0])
         bbox = box.xyxy[0].tolist()
         save_detection_object(uid, label, score, bbox)
-        detection_objects.append(
-            DetectionObject(id=idx, label=label, score=score, box=bbox)
-        )
+        detection_objects.append(DetectionObject(id=idx, label=label, score=score, box=bbox))
 
     return PredictResponse(
         uid=uid,
         timestamp=datetime.now(timezone.utc),
         original_image=original_path,
         predicted_image=predicted_path,
+        annotated_image_s3_key=annotated_key,
         detection_objects=detection_objects,
         processing_time_s=round(time.time() - start_time, 2),
     )

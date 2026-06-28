@@ -10,7 +10,11 @@ def _ai_msg(content, tool_calls=None, usage=None):
     msg = MagicMock(spec=AIMessage)
     msg.content = content
     msg.tool_calls = tool_calls or []
-    msg.usage_metadata = usage or {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    msg.usage_metadata = usage or {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
     return msg
 
 
@@ -39,15 +43,21 @@ def test_tool_call_then_text():
     )
 
     mock_tool = MagicMock()
-    mock_tool.invoke.return_value = ToolMessage(content="{}", tool_call_id="call_1")
+    mock_tool.invoke.return_value = ToolMessage(
+        content='{"uid": "u1", "annotated_image_s3_key": "predicted/u1.jpg", "detection_objects": []}',
+        tool_call_id="call_1",
+    )
 
-    with patch.object(agent_app, "llm_with_tools") as mock_llm, \
-         patch.dict(agent_app.TOOLS, {"detect_objects": mock_tool}):
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"detect_objects": mock_tool}),
+    ):
         mock_llm.invoke.side_effect = [tool_response, final_response]
-        text, tokens = agent_app.run_agent([HumanMessage(content="what's in this image?")])
+        text, tokens = agent_app.run_agent(
+            [HumanMessage(content="what's in this image?")]
+        )
 
     assert text == "I found 2 objects."
-    # Token counts must be summed across both LLM calls
     assert tokens == {"input": 25, "output": 8, "total": 33}
 
 
@@ -60,8 +70,10 @@ def test_max_iterations_exceeded():
     mock_tool = MagicMock()
     mock_tool.invoke.return_value = ToolMessage(content="{}", tool_call_id="call_x")
 
-    with patch.object(agent_app, "llm_with_tools") as mock_llm, \
-         patch.dict(agent_app.TOOLS, {"detect_objects": mock_tool}):
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"detect_objects": mock_tool}),
+    ):
         mock_llm.invoke.return_value = looping_response
         text, tokens = agent_app.run_agent(
             [HumanMessage(content="hello")], max_iterations=2

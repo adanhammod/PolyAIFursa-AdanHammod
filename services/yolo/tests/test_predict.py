@@ -1,12 +1,16 @@
+import io
 import os
+from unittest.mock import MagicMock
+
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-import numpy as np
 
 os.environ.setdefault("CONFIDENCE_THRESHOLD", "0.5")
+os.environ.setdefault("AWS_S3_BUCKET", "test-bucket")
 
-from app import app, init_db
+from app import app, init_db  # noqa: E402
 
 
 class FakeBox:
@@ -27,6 +31,18 @@ class FakeModel:
 
     def __call__(self, *args, **kwargs):
         return [FakeResult()]
+
+
+def _write_jpeg_to_fileobj(bucket, key, fileobj):
+    Image.new("RGB", (100, 100), color="white").save(fileobj, format="JPEG")
+
+
+@pytest.fixture(autouse=True)
+def mock_s3(monkeypatch):
+    fake = MagicMock()
+    fake.download_fileobj.side_effect = _write_jpeg_to_fileobj
+    monkeypatch.setattr("app.s3_client", fake)
+    return fake
 
 
 @pytest.fixture(autouse=True)
@@ -52,22 +68,8 @@ def client():
         yield client
 
 
-@pytest.fixture
-def test_image(tmp_path):
-    image_path = tmp_path / "test.jpg"
-    Image.new("RGB", (100, 100), color="white").save(image_path)
-    return image_path
-
-
-def test_predict_success(client, test_image):
-    """
-    Verify that uploading a valid image returns prediction data.
-    """
-    with open(test_image, "rb") as image_file:
-        response = client.post(
-            "/predict",
-            files={"file": ("test.jpg", image_file, "image/jpeg")}
-        )
+def test_predict_success(client, mock_s3):
+    response = client.post("/predict", json={"image_s3_key": "originals/test.jpg"})
 
     assert response.status_code == 200
 
@@ -81,22 +83,6 @@ def test_predict_success(client, test_image):
     assert len(data["detection_objects"]) == 1
     assert data["detection_objects"][0]["label"] == "person"
     assert "processing_time_s" in data
-
-
-def test_predict_rejects_non_image_file(client, tmp_path):
-    """
-    Verify that uploading a non-image file returns HTTP 400.
-    """
-    text_file = tmp_path / "test.txt"
-    text_file.write_text("not an image")
-
-    with open(text_file, "rb") as file:
-        response = client.post(
-            "/predict",
-            files={"file": ("test.txt", file, "text/plain")}
-        )
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "detail": "Only image files are supported"
-    }
+    assert "annotated_image_s3_key" in data
+    assert data["annotated_image_s3_key"].startswith("predicted/")
+    assert mock_s3.upload_fileobj.call_count == 1
