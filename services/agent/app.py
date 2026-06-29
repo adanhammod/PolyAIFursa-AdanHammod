@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
@@ -83,7 +84,24 @@ def detect_objects() -> str:
 # Registry: map tool name -> tool function
 TOOLS = {detect_objects.name: detect_objects}
 
-llm = init_chat_model(MODEL, temperature=0)
+rate_limiter = InMemoryRateLimiter(
+    requests_per_second=0.5,
+    check_every_n_seconds=0.1,
+    max_bucket_size=10,
+)
+
+llm = init_chat_model(
+    MODEL,
+    temperature=0,
+    rate_limiter=rate_limiter,
+)
+
+if not llm.profile.get("tool_calling"):
+    raise SystemExit(
+        f"[ERROR] Model '{MODEL}' does not support tool calling, "
+        "which is required by this agent."
+    )
+
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
@@ -96,8 +114,8 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
     Returns (response_text, token_counts) where token_counts has "input", "output", "total" keys.
     """
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
+    tokens = {"input": 0, "output": 0, "total": 0}
     iterations = 0
-    total_tokens: dict = {"input": 0, "output": 0, "total": 0}
 
     while True:
         iterations += 1
@@ -105,20 +123,20 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
         if iterations > max_iterations:
             return (
                 "Error: Agent exceeded maximum iterations without producing a final answer.",
-                total_tokens,
+                tokens,
             )
 
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
 
-        if response.usage_metadata:
-            total_tokens["input"] += response.usage_metadata.get("input_tokens", 0)
-            total_tokens["output"] += response.usage_metadata.get("output_tokens", 0)
-            total_tokens["total"] += response.usage_metadata.get("total_tokens", 0)
+        meta = response.usage_metadata or {}
+        tokens["input"] += meta.get("input_tokens", 0)
+        tokens["output"] += meta.get("output_tokens", 0)
+        tokens["total"] += meta.get("total_tokens", 0)
 
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
-            return response.content, total_tokens
+            return response.content, tokens
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
@@ -165,7 +183,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     annotated_image_base64: Optional[str] = None
-    tokens_used: Optional[dict] = None
+    tokens_used: dict  # {"input": int, "output": int, "total": int}
 
 
 @app.post("/chat", response_model=ChatResponse)
