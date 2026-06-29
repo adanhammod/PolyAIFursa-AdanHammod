@@ -1,5 +1,5 @@
 import base64
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -39,31 +39,31 @@ def test_chat_with_image_uploads_to_s3_and_returns_annotated():
     def fake_download(bucket, key, fileobj):
         fileobj.write(annotated_bytes)
 
+    def fake_run_agent(_messages):
+        agent_app._annotated_image_s3_key.set("predicted/yolo-uid-123.jpg")
+        return (
+            "I found 0 objects.",
+            {"input": 11, "output": 6, "total": 17},
+        )
+
     with patch.object(agent_app.s3_client, "download_fileobj") as mock_download:
         mock_download.side_effect = fake_download
 
         with patch("app.run_agent") as mock_run_agent:
-            mock_run_agent.return_value = (
-                "I found 0 objects.",
-                {"input": 11, "output": 6, "total": 17},
-            )
+            mock_run_agent.side_effect = fake_run_agent
 
-            token = agent_app._annotated_image_s3_key.set("predicted/yolo-uid-123.jpg")
-            try:
-                resp = client.post(
-                    "/chat",
-                    json={
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": "What is in this image?",
-                                "image_base64": image_b64,
-                            }
-                        ]
-                    },
-                )
-            finally:
-                agent_app._annotated_image_s3_key.reset(token)
+            resp = client.post(
+                "/chat",
+                json={
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "What is in this image?",
+                            "image_base64": image_b64,
+                        }
+                    ]
+                },
+            )
 
     assert resp.status_code == 200
     data = resp.json()
