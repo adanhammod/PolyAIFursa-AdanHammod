@@ -111,6 +111,7 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
       1. Send messages to the LLM.
       2. If the LLM requests tool calls, execute them and append results.
       3. Repeat until the LLM returns a plain text response.
+    Returns (response_text, token_counts) where token_counts has "input", "output", "total" keys.
     """
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
     tokens = {"input": 0, "output": 0, "total": 0}
