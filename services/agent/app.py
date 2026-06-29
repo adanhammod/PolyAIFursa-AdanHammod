@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from typing import Optional
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 logging.basicConfig(
@@ -21,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
@@ -45,8 +47,13 @@ SYSTEM_PROMPT = (
     "Use the available tools to extract information from images. "
 )
 
-_current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
-_annotated_image_url: ContextVar[Optional[str]] = ContextVar("annotated_image_url", default=None)
+_current_image_b64: ContextVar[Optional[str]] = ContextVar(
+    "current_image_b64", default=None
+)
+_annotated_image_url: ContextVar[Optional[str]] = ContextVar(
+    "annotated_image_url", default=None
+)
+
 
 @tool
 def detect_objects() -> str:
@@ -75,11 +82,19 @@ def detect_objects() -> str:
 
 
 # Registry: map tool name -> tool function
-TOOLS = {
-    detect_objects.name: detect_objects
-}
+TOOLS = {detect_objects.name: detect_objects}
 
-llm = init_chat_model(MODEL, temperature=0)
+rate_limiter = InMemoryRateLimiter(
+    requests_per_second=0.5,
+    check_every_n_seconds=0.1,
+    max_bucket_size=10,
+)
+
+llm = init_chat_model(
+    MODEL,
+    temperature=0,
+    rate_limiter=rate_limiter,
+)
 
 if not llm.profile.get("tool_calling"):
     raise SystemExit(
@@ -88,6 +103,7 @@ if not llm.profile.get("tool_calling"):
     )
 
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
+
 
 def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
     """
@@ -104,15 +120,18 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
         iterations += 1
 
         if iterations > max_iterations:
-            return "Error: Agent exceeded maximum iterations without producing a final answer.", tokens
+            return (
+                "Error: Agent exceeded maximum iterations without producing a final answer.",
+                tokens,
+            )
 
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
 
         meta = response.usage_metadata or {}
-        tokens["input"]  += meta.get("input_tokens", 0)
+        tokens["input"] += meta.get("input_tokens", 0)
         tokens["output"] += meta.get("output_tokens", 0)
-        tokens["total"]  += meta.get("total_tokens", 0)
+        tokens["total"] += meta.get("total_tokens", 0)
 
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
@@ -121,7 +140,7 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
             tool_fn = TOOLS[tool_call["name"]]
-            tool_result = tool_fn.invoke(tool_call)          # returns a ToolMessage
+            tool_result = tool_fn.invoke(tool_call)  # returns a ToolMessage
             messages.append(tool_result)
 
             # LangChain invokes tools in a copied context, so ContextVar.set() inside
@@ -140,9 +159,10 @@ app = FastAPI(title="Vision Agent")
 
 app.add_middleware(
     CORSMiddleware,
-     allow_origins=[
+    allow_origins=[
         "http://prod.adan.fursa.click:3000",
-        "http://adan-dev.fursa.click:3000","http://localhost:3000"
+        "http://adan-dev.fursa.click:3000",
+        "http://localhost:3000",
     ],
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
@@ -150,13 +170,13 @@ app.add_middleware(
 
 
 class ChatMessage(BaseModel):
-    role: str                           # "user" or "assistant"
+    role: str  # "user" or "assistant"
     content: str
     image_base64: Optional[str] = None  # only on user messages that carry an image
 
 
 class ChatRequest(BaseModel):
-    messages: list[ChatMessage]         # full conversation thread, oldest first
+    messages: list[ChatMessage]  # full conversation thread, oldest first
 
 
 class ChatResponse(BaseModel):
@@ -173,8 +193,11 @@ def chat(request: ChatRequest):
     for msg in request.messages:
         if msg.role == "user":
             if msg.image_base64:
-                latest_image = msg.image_base64          # saved for detect_objects tool
-                content = msg.content + "\n[An image was uploaded. Use existing tools to analyze it according to user instructions.]"
+                latest_image = msg.image_base64  # saved for detect_objects tool
+                content = (
+                    msg.content
+                    + "\n[An image was uploaded. Use existing tools to analyze it according to user instructions.]"
+                )
             else:
                 content = msg.content
             lc_messages.append(HumanMessage(content=content))
@@ -192,7 +215,8 @@ def chat(request: ChatRequest):
 
         # Strip any lines the LLM included that reference the raw image URL
         response_text = "\n".join(
-            line for line in response_text.splitlines()
+            line
+            for line in response_text.splitlines()
             if "Annotated image:" not in line
             and "http://localhost:8080/prediction/" not in line
             and (not image_url or image_url not in line)
@@ -207,7 +231,11 @@ def chat(request: ChatRequest):
             except Exception:
                 logging.exception("Failed to fetch annotated image")
 
-        return ChatResponse(response=response_text, annotated_image_base64=annotated_image_b64, tokens_used=tokens_used)
+        return ChatResponse(
+            response=response_text,
+            annotated_image_base64=annotated_image_b64,
+            tokens_used=tokens_used,
+        )
     finally:
         _current_image_b64.reset(token_img)
         _annotated_image_url.reset(token_url)
