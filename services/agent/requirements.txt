@@ -12,3 +12,5 @@ langchain-aws
 
 httpx
 pydantic
+pytest
+pytest-asyncio
