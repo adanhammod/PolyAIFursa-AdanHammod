@@ -95,7 +95,6 @@ def detect_objects() -> str:
 
 # Registry: map tool name -> tool function
 TOOLS = {detect_objects.name: detect_objects}
-<<<<<<< HEAD
 
 rate_limiter = InMemoryRateLimiter(
     requests_per_second=0.5,
@@ -115,17 +114,11 @@ if not llm.profile.get("tool_calling"):
         f"[ERROR] Model '{MODEL}' does not support tool calling, "
         "which is required by this agent."
     )
-=======
->>>>>>> feature/s3-integration
 
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
-<<<<<<< HEAD
 def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
-=======
-def run_agent(history: list, max_iterations: int = 10) -> str:
->>>>>>> feature/s3-integration
     """
     Simple ReAct loop:
       1. Send messages to the LLM.
@@ -257,13 +250,9 @@ def chat(request: ChatRequest):
                 logging.exception("Failed to fetch annotated image from S3")
 
         return ChatResponse(
-<<<<<<< HEAD
             response=response_text,
             annotated_image_base64=annotated_image_b64,
             tokens_used=tokens_used,
-=======
-            response=response_text, annotated_image_base64=annotated_image_b64
->>>>>>> feature/s3-integration
         )
     finally:
         _current_image_b64.reset(token_img)
