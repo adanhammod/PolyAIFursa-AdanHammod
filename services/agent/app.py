@@ -40,6 +40,7 @@ ALLOWED_MODELS = {
     "bedrock/openai.gpt-oss-20b-1:0",
     "bedrock/meta.llama3-1-8b-instruct-v1:0",
     "bedrock/mistral.mistral-7b-instruct-v0:2",
+    "bedrock_converse:openai.gpt-oss-20b-1:0",
 }
 
 if MODEL not in ALLOWED_MODELS:
@@ -61,7 +62,6 @@ s3_client = boto3.client("s3", region_name=AWS_REGION)
 _current_image_b64: ContextVar[Optional[str]] = ContextVar(
     "current_image_b64", default=None
 )
-
 _annotated_image_s3_key: ContextVar[Optional[str]] = ContextVar(
     "annotated_image_s3_key", default=None
 )
@@ -95,6 +95,7 @@ def detect_objects() -> str:
 
 # Registry: map tool name -> tool function
 TOOLS = {detect_objects.name: detect_objects}
+<<<<<<< HEAD
 
 rate_limiter = InMemoryRateLimiter(
     requests_per_second=0.5,
@@ -114,11 +115,17 @@ if not llm.profile.get("tool_calling"):
         f"[ERROR] Model '{MODEL}' does not support tool calling, "
         "which is required by this agent."
     )
+=======
+>>>>>>> feature/s3-integration
 
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
+<<<<<<< HEAD
 def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
+=======
+def run_agent(history: list, max_iterations: int = 10) -> str:
+>>>>>>> feature/s3-integration
     """
     Simple ReAct loop:
       1. Send messages to the LLM.
@@ -134,10 +141,14 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
         iterations += 1
 
         if iterations > max_iterations:
+<<<<<<< HEAD
             return (
                 "Error: Agent exceeded maximum iterations without producing a final answer.",
                 tokens,
             )
+=======
+            return "Error: Agent exceeded maximum iterations without producing a final answer."
+>>>>>>> feature/s3-integration
 
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
@@ -246,9 +257,13 @@ def chat(request: ChatRequest):
                 logging.exception("Failed to fetch annotated image from S3")
 
         return ChatResponse(
+<<<<<<< HEAD
             response=response_text,
             annotated_image_base64=annotated_image_b64,
             tokens_used=tokens_used,
+=======
+            response=response_text, annotated_image_base64=annotated_image_b64
+>>>>>>> feature/s3-integration
         )
     finally:
         _current_image_b64.reset(token_img)
