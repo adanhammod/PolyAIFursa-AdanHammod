@@ -4,14 +4,20 @@ python-dotenv
 langchain
 langgraph
 langchain-core
+<<<<<<< HEAD
 
 langchain[openai]
 langchain[anthropic]
 langchain[google-genai]
+=======
+>>>>>>> feature/s3-integration
 langchain-aws
 
 httpx
 pydantic
+<<<<<<< HEAD
 pytest
 pytest-asyncio
+=======
+>>>>>>> feature/s3-integration
 boto3
