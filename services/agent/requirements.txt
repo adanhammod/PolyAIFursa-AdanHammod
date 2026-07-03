@@ -4,10 +4,7 @@ python-dotenv
 langchain
 langgraph
 langchain-core
-
-langchain[openai]
-langchain[anthropic]
-langchain[google-genai]
+langchain-aws
 
 httpx
 pydantic

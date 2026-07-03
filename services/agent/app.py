@@ -32,8 +32,12 @@ MODEL = os.environ.get("MODEL")
 
 # Text-only models
 ALLOWED_MODELS = {
-    "openai:gpt-5.4-mini",
-    "anthropic:claude-haiku-4-5",
+    "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+    "bedrock/amazon.nova-micro-v1:0",
+    "bedrock/amazon.nova-lite-v1:0",
+    "bedrock/openai.gpt-oss-20b-1:0",
+    "bedrock/meta.llama3-1-8b-instruct-v1:0",
+    "bedrock/mistral.mistral-7b-instruct-v0:2",
 }
 
 if MODEL not in ALLOWED_MODELS:
@@ -86,7 +90,7 @@ TOOLS = {
     detect_objects.name: detect_objects
 }
 
-llm = init_chat_model(MODEL, temperature=0)
+llm = init_chat_model(MODEL, temperature=0, region_name=AWS_REGION)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 def run_agent(history: list , max_iterations: int = 10) -> str:

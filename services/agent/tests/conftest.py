@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-os.environ.setdefault("MODEL", "anthropic:claude-haiku-4-5")
+os.environ.setdefault("MODEL", "bedrock/anthropic.claude-3-haiku-20240307-v1:0")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("AWS_S3_BUCKET", "test-bucket")
 
