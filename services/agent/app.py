@@ -63,7 +63,6 @@ SYSTEM_PROMPT = (
     "Use the available tools to extract information from images. "
 )
 
-<<<<<<< HEAD
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET")
 s3_client = boto3.client("s3", region_name=AWS_REGION)
@@ -73,15 +72,7 @@ _current_image_b64: ContextVar[Optional[str]] = ContextVar(
 )
 _annotated_image_s3_key: ContextVar[Optional[str]] = ContextVar(
     "annotated_image_s3_key", default=None
-=======
-_current_image_b64: ContextVar[Optional[str]] = ContextVar(
-    "current_image_b64", default=None
 )
-_annotated_image_url: ContextVar[Optional[str]] = ContextVar(
-    "annotated_image_url", default=None
->>>>>>> main
-)
-
 
 @tool
 def detect_objects() -> str:
