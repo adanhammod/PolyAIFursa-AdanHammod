@@ -149,7 +149,15 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
 
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
-            return response.content, tokens
+            content = response.content
+
+        if isinstance(content, list):
+            content = "\n".join(
+                item.get("text", str(item)) if isinstance(item, dict) else str(item)
+                for item in content
+            )
+
+        return content, tokens
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
