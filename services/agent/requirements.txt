@@ -4,13 +4,10 @@ python-dotenv
 langchain
 langgraph
 langchain-core
-
-langchain[openai]
-langchain[anthropic]
-langchain[google-genai]
 langchain-aws
 
 httpx
 pydantic
+Sboto3
 pytest
 pytest-asyncio
