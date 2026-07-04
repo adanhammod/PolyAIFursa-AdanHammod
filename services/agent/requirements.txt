@@ -8,6 +8,6 @@ langchain-aws
 
 httpx
 pydantic
-Sboto3
+boto3
 pytest
 pytest-asyncio
