@@ -3,10 +3,10 @@ from fastapi.responses import FileResponse, Response
 from prometheus_fastapi_instrumentator import Instrumentator
 from ultralytics import YOLO
 from PIL import Image
-from fastapi import HTTPException
 from contextlib import closing
 from pydantic import BaseModel, field_validator
 from datetime import datetime, timezone
+from typing import Optional
 import json
 
 import sys
