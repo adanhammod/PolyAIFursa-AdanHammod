@@ -34,7 +34,6 @@ MODEL = os.environ.get("MODEL")
 
 # Text-only models
 ALLOWED_MODELS = {
-<<<<<<< HEAD
     "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
     "bedrock/amazon.nova-micro-v1:0",
     "bedrock/amazon.nova-lite-v1:0",
@@ -42,13 +41,6 @@ ALLOWED_MODELS = {
     "bedrock/meta.llama3-1-8b-instruct-v1:0",
     "bedrock/mistral.mistral-7b-instruct-v0:2",
     "bedrock_converse:openai.gpt-oss-20b-1:0",
-=======
-    "openai:gpt-5.4-mini",
-    "anthropic:claude-haiku-4-5",
-    "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
-    "bedrock/amazon.nova-micro-v1:0",
-    "bedrock/amazon.nova-lite-v1:0",
->>>>>>> main
 }
 
 if MODEL not in ALLOWED_MODELS:
@@ -73,6 +65,7 @@ _current_image_b64: ContextVar[Optional[str]] = ContextVar(
 _annotated_image_s3_key: ContextVar[Optional[str]] = ContextVar(
     "annotated_image_s3_key", default=None
 )
+
 
 @tool
 def detect_objects() -> str:
