@@ -1,76 +1,102 @@
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-import app as app_module
-from app import run_agent
+import app as agent_app
 
 
-def _ai_text(text):
-    return AIMessage(content=text, tool_calls=[])
+def _ai_msg(content="", tool_calls=None, usage=None):
+    msg = MagicMock(spec=AIMessage)
+    msg.content = content
+    msg.tool_calls = tool_calls or []
+    msg.usage_metadata = usage or {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
+    return msg
 
 
-def _ai_tool_call(call_id="call-1"):
-    return AIMessage(
-        content="",
-        tool_calls=[{"name": "detect_objects", "id": call_id, "args": {}}],
+def _fake_tool_result(payload: dict, call_id="call_1"):
+    return ToolMessage(
+        content=json.dumps(payload),
+        tool_call_id=call_id,
     )
 
 
-def _fake_tool_result(payload: dict) -> MagicMock:
-    result = MagicMock(spec=ToolMessage)
-    result.content = json.dumps(payload)
-    return result
+def test_plain_text_response():
+    ai_msg = _ai_msg(
+        "Hi there!",
+        usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    )
 
+    with patch.object(agent_app, "llm_with_tools") as mock_llm:
+        mock_llm.invoke.return_value = ai_msg
+        text, tokens = agent_app.run_agent([HumanMessage(content="hello")])
 
-def test_run_agent_plain_text_response(mock_llm):
-    mock_llm.invoke.return_value = _ai_text("Hello from agent.")
-
-    result = run_agent([HumanMessage(content="Hi")])
-
-    assert result == "Hello from agent."
+    assert text == "Hi there!"
+    assert tokens == {"input": 10, "output": 5, "total": 15}
     assert mock_llm.invoke.call_count == 1
 
 
-def test_run_agent_tool_call_then_text(mock_llm, monkeypatch):
-    tool_result = _fake_tool_result({
-        "uid": "u1",
-        "annotated_image_s3_key": "predicted/u1.jpg",
-        "detection_objects": [],
-    })
+def test_tool_call_then_text():
+    tool_response = _ai_msg(
+        content="",
+        tool_calls=[{"name": "detect_objects", "id": "call_1", "args": {}}],
+        usage={"input_tokens": 10, "output_tokens": 3, "total_tokens": 13},
+    )
 
-    call_count = 0
+    final_response = _ai_msg(
+        "I found 2 objects.",
+        usage={"input_tokens": 15, "output_tokens": 5, "total_tokens": 20},
+    )
 
-    def fake_invoke(messages):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return _ai_tool_call()
-        return _ai_text("Done processing.")
+    mock_tool = MagicMock()
+    mock_tool.invoke.return_value = _fake_tool_result(
+        {
+            "uid": "u1",
+            "annotated_image_s3_key": "predicted/u1.jpg",
+            "detection_objects": [],
+        },
+        call_id="call_1",
+    )
 
-    mock_llm.invoke.side_effect = fake_invoke
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"detect_objects": mock_tool}),
+    ):
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        text, tokens = agent_app.run_agent(
+            [HumanMessage(content="what's in this image?")]
+        )
 
-    fake_tool = MagicMock()
-    fake_tool.invoke.return_value = tool_result
-    monkeypatch.setattr("app.TOOLS", {"detect_objects": fake_tool})
-
-    result = run_agent([HumanMessage(content="Analyze this.")])
-
-    assert result == "Done processing."
+    assert text == "I found 2 objects."
+    assert tokens == {"input": 25, "output": 8, "total": 33}
     assert mock_llm.invoke.call_count == 2
-    assert fake_tool.invoke.call_count == 1
+    assert mock_tool.invoke.call_count == 1
 
 
-def test_run_agent_max_iterations_exceeded(mock_llm, monkeypatch):
-    mock_llm.invoke.return_value = _ai_tool_call()
+def test_max_iterations_exceeded():
+    looping_response = _ai_msg(
+        content="",
+        tool_calls=[{"name": "detect_objects", "id": "call_x", "args": {}}],
+        usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+    )
 
-    fake_tool = MagicMock()
-    fake_tool.invoke.return_value = _fake_tool_result({})
-    monkeypatch.setattr("app.TOOLS", {"detect_objects": fake_tool})
+    mock_tool = MagicMock()
+    mock_tool.invoke.return_value = ToolMessage(content="{}", tool_call_id="call_x")
 
-    result = run_agent([HumanMessage(content="Loop forever.")], max_iterations=3)
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"detect_objects": mock_tool}),
+    ):
+        mock_llm.invoke.return_value = looping_response
+        text, tokens = agent_app.run_agent(
+            [HumanMessage(content="hello")],
+            max_iterations=2,
+        )
 
-    assert "exceeded maximum iterations" in result
-    assert mock_llm.invoke.call_count == 3
+    assert "maximum iterations" in text
+    assert tokens == {"input": 10, "output": 4, "total": 14}
+    assert mock_llm.invoke.call_count == 2

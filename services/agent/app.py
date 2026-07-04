@@ -25,6 +25,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
@@ -33,6 +34,7 @@ MODEL = os.environ.get("MODEL")
 
 # Text-only models
 ALLOWED_MODELS = {
+<<<<<<< HEAD
     "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
     "bedrock/amazon.nova-micro-v1:0",
     "bedrock/amazon.nova-lite-v1:0",
@@ -40,6 +42,13 @@ ALLOWED_MODELS = {
     "bedrock/meta.llama3-1-8b-instruct-v1:0",
     "bedrock/mistral.mistral-7b-instruct-v0:2",
     "bedrock_converse:openai.gpt-oss-20b-1:0",
+=======
+    "openai:gpt-5.4-mini",
+    "anthropic:claude-haiku-4-5",
+    "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+    "bedrock/amazon.nova-micro-v1:0",
+    "bedrock/amazon.nova-lite-v1:0",
+>>>>>>> main
 }
 
 if MODEL not in ALLOWED_MODELS:
@@ -54,6 +63,7 @@ SYSTEM_PROMPT = (
     "Use the available tools to extract information from images. "
 )
 
+<<<<<<< HEAD
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET")
 s3_client = boto3.client("s3", region_name=AWS_REGION)
@@ -63,6 +73,13 @@ _current_image_b64: ContextVar[Optional[str]] = ContextVar(
 )
 _annotated_image_s3_key: ContextVar[Optional[str]] = ContextVar(
     "annotated_image_s3_key", default=None
+=======
+_current_image_b64: ContextVar[Optional[str]] = ContextVar(
+    "current_image_b64", default=None
+)
+_annotated_image_url: ContextVar[Optional[str]] = ContextVar(
+    "annotated_image_url", default=None
+>>>>>>> main
 )
 
 
@@ -95,33 +112,60 @@ def detect_objects() -> str:
 # Registry: map tool name -> tool function
 TOOLS = {detect_objects.name: detect_objects}
 
-llm = init_chat_model(MODEL, temperature=0, region_name=AWS_REGION)
+rate_limiter = InMemoryRateLimiter(
+    requests_per_second=0.5,
+    check_every_n_seconds=0.1,
+    max_bucket_size=10,
+)
+
+llm = init_chat_model(
+    MODEL,
+    temperature=0,
+    rate_limiter=rate_limiter,
+    region_name=AWS_REGION,
+)
+
+if not llm.profile.get("tool_calling"):
+    raise SystemExit(
+        f"[ERROR] Model '{MODEL}' does not support tool calling, "
+        "which is required by this agent."
+    )
+
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
-def run_agent(history: list, max_iterations: int = 10) -> str:
+def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
     """
     Simple ReAct loop:
       1. Send messages to the LLM.
       2. If the LLM requests tool calls, execute them and append results.
       3. Repeat until the LLM returns a plain text response.
+    Returns (response_text, token_counts) where token_counts has "input", "output", "total" keys.
     """
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
-
+    tokens = {"input": 0, "output": 0, "total": 0}
     iterations = 0
 
     while True:
         iterations += 1
 
         if iterations > max_iterations:
-            return "Error: Agent exceeded maximum iterations without producing a final answer."
+            return (
+                "Error: Agent exceeded maximum iterations without producing a final answer.",
+                tokens,
+            )
 
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
 
+        meta = response.usage_metadata or {}
+        tokens["input"] += meta.get("input_tokens", 0)
+        tokens["output"] += meta.get("output_tokens", 0)
+        tokens["total"] += meta.get("total_tokens", 0)
+
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
-            return response.content
+            return response.content, tokens
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
@@ -170,6 +214,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     annotated_image_base64: Optional[str] = None
+    tokens_used: dict  # {"input": int, "output": int, "total": int}
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -194,7 +239,7 @@ def chat(request: ChatRequest):
     token_img = _current_image_b64.set(latest_image)
     token_key = _annotated_image_s3_key.set(None)
     try:
-        response_text = run_agent(lc_messages)
+        response_text, tokens_used = run_agent(lc_messages)
         annotated_image_b64 = None
 
         annotated_key = _annotated_image_s3_key.get()
@@ -217,7 +262,9 @@ def chat(request: ChatRequest):
                 logging.exception("Failed to fetch annotated image from S3")
 
         return ChatResponse(
-            response=response_text, annotated_image_base64=annotated_image_b64
+            response=response_text,
+            annotated_image_base64=annotated_image_b64,
+            tokens_used=tokens_used,
         )
     finally:
         _current_image_b64.reset(token_img)
