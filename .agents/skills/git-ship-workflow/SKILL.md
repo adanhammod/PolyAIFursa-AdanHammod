@@ -1,6 +1,6 @@
 ---
-name: git-ship-to-dev
-description: Use this skill when asked to ship the current branch. Stages and commits all changes, merges into dev, pushes dev, waits for the deploy-dev CI job to pass, then opens a PR from dev to main.
+name: git-ship-workflow
+description: Use this skill when asked to ship the current branch. Stage and commit changes, merge the feature branch into dev, push dev, wait for the deploy workflow to succeed, then open a PR from the original feature branch to main.
 
 # Ship Current Branch to Dev
 
@@ -43,11 +43,13 @@ If the diff is empty (nothing staged), tell the user there is nothing to commit 
 Generate a commit message from the staged diff. The message must explain the **purpose** of the change, not just list which files were modified.
 
 Follow the existing commit style in this repository:
+
 - Descriptive verb phrases: "Refactor X to do Y", "Fix Z in W", "Add Q for R"
 - Use conventional commit prefixes when the type is clear: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `ci:`
 - Keep the subject line under 72 characters
 
 Examples of good messages:
+
 ```
 feat(yolo): add S3 upload step before running inference
 fix(ci): allow Docker Scout to comment on pull requests
@@ -56,6 +58,7 @@ refactor(agent): simplify tool-calling loop
 ```
 
 Run the commit:
+
 ```bash
 git commit -m "<your generated message>"
 ```
@@ -82,6 +85,7 @@ git merge <current-branch>
 Do **not** auto-resolve conflicts. Never use `git merge -X ours` or `git merge -X theirs`.
 
 Run:
+
 ```bash
 git status
 ```
@@ -89,6 +93,7 @@ git status
 List every file shown under "both modified" or "unmerged". Then stop and say:
 
 > There are merge conflicts in the following files:
+>
 > - [list the files]
 >
 > Please resolve these conflicts manually, then let me know and I will continue.
@@ -111,9 +116,11 @@ The output must show **"nothing to commit, working tree clean"** (or equivalent)
 - If it shows unmerged paths, the conflicts are not fully resolved — stop and tell the user.
 
 If the merge required a merge commit and git is waiting for it:
+
 ```bash
 git commit
 ```
+
 (This completes the merge commit with the default message.)
 
 ---
@@ -172,27 +179,28 @@ Show the failed job logs to the user, then stop. Do **not** open a PR.
 
 ---
 
-## Step 13 — If CI passed, check for an existing PR
+## Step 13 — Check for an existing PR from the original feature branch to main
 
 ```bash
-gh pr list --base main --head dev --state open
+gh pr list --base main --head <current-branch> --state open
 ```
 
 If a PR already exists, show its URL to the user. You are done — do not open a duplicate.
 
 ---
 
-## Step 14 — Open a PR from dev to main
+## Step 14 — Open a PR from the original feature branch to main
 
 If no open PR exists:
 
 ```bash
-gh pr create --base main --head dev --fill
+gh pr create --base main --head <current-branch> --fill
 ```
 
 Show the PR URL to the user.
 
 > Note: Opening this PR triggers the `test.yaml` workflow, which runs pytest. You can monitor test results with:
+>
 > ```bash
 > gh pr checks
 > ```
@@ -201,13 +209,14 @@ Show the PR URL to the user.
 
 ## Summary of safety rules
 
-| Rule | Detail |
-|------|--------|
-| No force push | Never use `--force` on dev or main |
-| No auto-resolve | Never use `git merge -X ours` or `git merge -X theirs` |
-| Stop on conflict | Run `git status`, list conflicted files, wait for the user |
-| Verify before push | `git status` must be clean before `git push` |
-| Check output | Read every command's output before the next step |
-| Stop on error | Show the exact error; do not guess or retry blindly |
-| PR only after CI | Only open the PR if the deploy-dev run concluded as `success` |
+| Rule               | Detail                                                        |
+| ------------------ | ------------------------------------------------------------- |
+| No force push      | Never use `--force` on dev or main                            |
+| No auto-resolve    | Never use `git merge -X ours` or `git merge -X theirs`        |
+| Stop on conflict   | Run `git status`, list conflicted files, wait for the user    |
+| Verify before push | `git status` must be clean before `git push`                  |
+| Check output       | Read every command's output before the next step              |
+| Stop on error      | Show the exact error; do not guess or retry blindly           |
+| PR only after CI   | Only open the PR if the deploy-dev run concluded as `success` |
+
 ---
