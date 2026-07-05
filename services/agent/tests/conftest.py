@@ -34,3 +34,11 @@ def mock_s3(monkeypatch):
     fake = MagicMock()
     monkeypatch.setattr("app.s3_client", fake)
     return fake
+
+
+@pytest.fixture
+def mock_call_mcp(monkeypatch):
+    """Patch _call_mcp so tests don't need a live MCP server."""
+    fake = MagicMock(return_value="ZmFrZWltYWdl")  # dummy base64 string
+    monkeypatch.setattr("app._call_mcp", fake)
+    return fake

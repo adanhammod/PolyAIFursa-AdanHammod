@@ -77,6 +77,38 @@ def test_tool_call_then_text():
     assert mock_tool.invoke.call_count == 1
 
 
+def test_rotate_image_tool_call():
+    tool_response = _ai_msg(
+        content="",
+        tool_calls=[{"name": "rotate_image", "id": "call_rot", "args": {"angle": 90.0}}],
+        usage={"input_tokens": 10, "output_tokens": 3, "total_tokens": 13},
+    )
+    final_response = _ai_msg(
+        "Image has been rotated 90 degrees.",
+        usage={"input_tokens": 15, "output_tokens": 6, "total_tokens": 21},
+    )
+
+    mock_tool = MagicMock()
+    mock_tool.invoke.return_value = _fake_tool_result(
+        {"processed_image_b64": "ZmFrZWltYWdl"},
+        call_id="call_rot",
+    )
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"rotate_image": mock_tool}),
+    ):
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        text, tokens = agent_app.run_agent(
+            [HumanMessage(content="rotate the image 90 degrees")]
+        )
+
+    assert text == "Image has been rotated 90 degrees."
+    assert tokens == {"input": 25, "output": 9, "total": 34}
+    assert mock_llm.invoke.call_count == 2
+    assert mock_tool.invoke.call_count == 1
+
+
 def test_max_iterations_exceeded():
     looping_response = _ai_msg(
         content="",

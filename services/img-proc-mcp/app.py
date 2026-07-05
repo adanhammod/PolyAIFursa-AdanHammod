@@ -1,11 +1,13 @@
 import base64
 import io
+import os
 
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("img-proc")
+MCP_PORT = int(os.environ.get("MCP_PORT", 8000))
+mcp = FastMCP("img-proc", port=MCP_PORT)
 
 
 def _decode(image_b64: str) -> Image.Image:
