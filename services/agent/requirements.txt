@@ -10,4 +10,5 @@ httpx
 pydantic
 pytest
 pytest-asyncio
+pytest-cov
 boto3
