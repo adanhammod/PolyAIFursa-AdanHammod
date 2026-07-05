@@ -204,7 +204,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     annotated_image_base64: Optional[str] = None
-    tokens_used: Optional[dict] = None
+    tokens_used: dict  # {"input": int, "output": int, "total": int}
 
 
 @app.post("/chat", response_model=ChatResponse)

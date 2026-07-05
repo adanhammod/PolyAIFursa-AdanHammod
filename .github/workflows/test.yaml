@@ -36,6 +36,7 @@ jobs:
           fail_ci_if_error: true
 
   test-agent:
+  docker-scout:
     runs-on: ubuntu-latest
 
     steps:
@@ -56,3 +57,22 @@ jobs:
           MODEL: openai:gpt-5.4-mini
         run: |
           pytest tests/ -v
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build YOLO image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/yolo
+          push: false
+          tags: yolo-service:ci
+
+      - name: Scan YOLO image with Docker Scout
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: yolo-service:ci
+          only-severities: critical,high
