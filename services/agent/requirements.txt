@@ -12,3 +12,4 @@ boto3
 mcp
 pytest
 pytest-asyncio
+pytest-cov
