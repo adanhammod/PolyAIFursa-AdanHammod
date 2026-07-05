@@ -34,9 +34,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: services/yolo/coverage.xml
           fail_ci_if_error: true
-
-  test-agent:
-  docker-scout:
+    test-agent:
     runs-on: ubuntu-latest
 
     steps:
@@ -54,9 +52,18 @@ jobs:
       - name: Run agent tests
         working-directory: services/agent
         env:
-          MODEL: openai:gpt-5.4-mini
+          MODEL: bedrock/anthropic.claude-3-haiku-20240307-v1:0
+          AWS_REGION: us-east-1
+          AWS_S3_BUCKET: test-bucket
         run: |
           pytest tests/ -v
+
+  docker-scout:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
