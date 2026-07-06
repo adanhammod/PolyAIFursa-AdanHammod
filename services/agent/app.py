@@ -144,6 +144,38 @@ _JSON_TYPE_MAP: dict[str, type] = {
     "object": dict,
 }
 
+_HIDDEN_BLOCK_TYPES = {"reasoning_content", "reasoning", "thinking"}
+
+
+def _extract_visible_text(content) -> str:
+    """Return only the user-visible text from an LLM response content value.
+
+    Some models (e.g. extended-thinking variants) include reasoning/thinking
+    blocks alongside their user-facing text. We must never expose those blocks
+    to the frontend — neither as raw dicts nor as stringified representations.
+
+    Rules:
+    - str  → returned as-is
+    - list → only items with type == "text" contribute; reasoning/thinking
+              blocks and unknown dict types are silently dropped
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                if item.get("type") in _HIDDEN_BLOCK_TYPES:
+                    continue
+                if item.get("type") == "text":
+                    parts.append(item.get("text", ""))
+                # Unknown dict types: silently ignored
+            else:
+                parts.append(str(item))
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
 # Standalone image-label lines the LLM emits after MCP tool calls,
 # e.g. "Rotated image", "Blurred image.". Stripped from response text
 # when the actual image is being returned in annotated_image_base64.
@@ -365,13 +397,7 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
 
         # No tool calls → final answer (also covers the all-names-dropped case)
         if not response.tool_calls:
-            content = response.content
-            if isinstance(content, list):
-                content = "\n".join(
-                    item.get("text", str(item)) if isinstance(item, dict) else str(item)
-                    for item in content
-                )
-            return content, tokens
+            return _extract_visible_text(response.content), tokens
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:

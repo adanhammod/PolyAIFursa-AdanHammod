@@ -437,3 +437,60 @@ def test_unknown_tool_name_gets_error_tool_message():
     payload = json.loads(tool_msgs[0].content)
     assert "error" in payload
     assert "nonexistent_tool" in payload["error"]
+
+
+# ---------------------------------------------------------------------------
+# _extract_visible_text — unit tests
+# ---------------------------------------------------------------------------
+
+def test_extract_visible_text_string_passthrough():
+    assert agent_app._extract_visible_text("Hello!") == "Hello!"
+
+
+def test_extract_visible_text_keeps_text_blocks_drops_reasoning():
+    content = [
+        {"type": "reasoning_content", "reasoning_content": {"text": "secret chain-of-thought"}},
+        {"type": "text", "text": "Visible answer."},
+    ]
+    result = agent_app._extract_visible_text(content)
+    assert result == "Visible answer."
+    assert "reasoning_content" not in result
+    assert "secret" not in result
+
+
+def test_extract_visible_text_only_reasoning_returns_empty():
+    content = [
+        {"type": "thinking", "thinking": "internal monologue"},
+        {"type": "reasoning", "reasoning": "more internal"},
+    ]
+    result = agent_app._extract_visible_text(content)
+    assert result == ""
+
+
+def test_extract_visible_text_unknown_dict_type_ignored():
+    content = [
+        {"type": "tool_use", "id": "t1", "name": "rotate"},
+        {"type": "text", "text": "Done."},
+    ]
+    result = agent_app._extract_visible_text(content)
+    assert result == "Done."
+
+
+def test_run_agent_strips_reasoning_content_from_final_response():
+    """reasoning_content blocks must not appear in the text returned by run_agent."""
+    content = [
+        {"type": "reasoning_content", "reasoning_content": {"text": "I am thinking..."}},
+        {"type": "text", "text": "The answer is 42."},
+    ]
+    ai_msg = _ai_msg(
+        content=content,
+        usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    )
+
+    with patch.object(agent_app, "llm_with_tools") as mock_llm:
+        mock_llm.invoke.return_value = ai_msg
+        text, _ = agent_app.run_agent([HumanMessage(content="what is the answer?")])
+
+    assert text == "The answer is 42."
+    assert "reasoning_content" not in text
+    assert "I am thinking" not in text
