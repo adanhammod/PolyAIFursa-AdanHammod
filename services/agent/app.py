@@ -273,6 +273,11 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
         tokens["output"] += meta.get("output_tokens", 0)
         tokens["total"] += meta.get("total_tokens", 0)
 
+        logging.info(
+            "LLM response: tool_calls=%s",
+            [{"name": tc["name"], "args": tc["args"]} for tc in response.tool_calls],
+        )
+
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
             content = response.content
@@ -285,9 +290,25 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
-            tool_fn = TOOLS[tool_call["name"]]
-            logging.info("Calling tool: %s", tool_call["name"])
-            tool_result = tool_fn.invoke(tool_call)  # returns a ToolMessage
+            tool_name = tool_call["name"]
+            tool_args = {k: v for k, v in tool_call["args"].items() if "b64" not in k and "base64" not in k}
+            in_tools = tool_name in TOOLS
+            logging.info(
+                "Tool selected: %s | args: %s | in TOOLS: %s",
+                tool_name, tool_args, in_tools,
+            )
+            if not in_tools:
+                logging.error("Unknown tool requested: %s — available: %s", tool_name, list(TOOLS))
+                continue
+
+            tool_fn = TOOLS[tool_name]
+            logging.info("Executing tool: %s", tool_name)
+            try:
+                tool_result = tool_fn.invoke(tool_call)  # returns a ToolMessage
+            except Exception:
+                logging.exception("Tool execution failed: %s", tool_name)
+                raise
+            logging.info("Tool finished: %s", tool_name)
 
             # Extract side-effect data and strip image base64 before adding to
             # LLM context — raw base64 exceeds Bedrock's context length limit.
