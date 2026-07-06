@@ -359,3 +359,68 @@ def test_frontend_response_never_contains_reasoning_content():
     assert "reasoning_content" not in data["response"]
     assert "secret reasoning" not in data["response"]
     assert data["response"] == "Here is your answer."
+
+
+def test_consecutive_requests_use_different_images():
+    """Two consecutive /chat requests with different images must each use their own image."""
+    imageA = base64.b64encode(b"imageA").decode()
+    imageB = base64.b64encode(b"imageB").decode()
+    captured: list[str | None] = []
+
+    def spy(messages):
+        captured.append(agent_app._current_image_b64.get())
+        return ("done", {"input": 1, "output": 1, "total": 2})
+
+    with patch("app.run_agent", side_effect=spy):
+        # Request 1: single user message with imageA
+        client.post(
+            "/chat",
+            json={"messages": [{"role": "user", "content": "blur", "image_base64": imageA}]},
+        )
+        # Request 2: history includes old user msg with imageA; newest user msg has imageB
+        client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "blur", "image_base64": imageA},
+                    {"role": "assistant", "content": "done"},
+                    {"role": "user", "content": "rotate", "image_base64": imageB},
+                ]
+            },
+        )
+
+    assert captured[0] == imageA, "Request 1 must use imageA"
+    assert captured[1] == imageB, "Request 2 must use imageB, not old imageA"
+    assert captured[0] != captured[1]
+
+
+def test_new_request_without_upload_does_not_fall_back_to_old_image():
+    """If the newest user message has no image_base64, _current_image_b64 must be None.
+
+    The backend must not fall back to image_base64 from an older user message in
+    the conversation history — that would silently process the wrong image.
+    """
+    imageA = base64.b64encode(b"imageA").decode()
+    captured: list[str | None] = []
+
+    def spy(messages):
+        captured.append(agent_app._current_image_b64.get())
+        return ("done", {"input": 1, "output": 1, "total": 2})
+
+    with patch("app.run_agent", side_effect=spy):
+        # History has imageA in an old user message; newest user message has NO image
+        client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "blur", "image_base64": imageA},
+                    {"role": "assistant", "content": "done"},
+                    {"role": "user", "content": "what did you do?"},  # no image
+                ]
+            },
+        )
+
+    assert captured[0] is None, (
+        "_current_image_b64 must be None when latest user message has no upload; "
+        "must not fall back to old imageA"
+    )

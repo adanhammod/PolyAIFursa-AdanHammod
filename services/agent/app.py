@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -149,6 +150,14 @@ _JSON_TYPE_MAP: dict[str, type] = {
     "object": dict,
 }
 
+def _img_tag(b64: Optional[str]) -> str:
+    """Return a safe, non-reversible log tag for an image (never logs raw base64)."""
+    if not b64:
+        return "none"
+    tag = hashlib.sha256(b64[:256].encode()).hexdigest()[:8]
+    return f"len={len(b64)} tag={tag}"
+
+
 _HIDDEN_BLOCK_TYPES = {"reasoning_content", "reasoning", "thinking"}
 
 
@@ -270,6 +279,7 @@ def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
         image_b64 = _current_image_b64.get()
         if not image_b64:
             return json.dumps({"error": "No image was provided by the user."})
+        logging.info("MCP tool %r: input image %s", tool_name, _img_tag(image_b64))
         result_b64 = _call_mcp(tool_name, {"image_b64": image_b64, **kwargs})
         return json.dumps({"processed_image_b64": result_b64})
 
@@ -470,6 +480,9 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
                     _current_image_b64.set(processed_b64)
                     _processed_image_b64.set(processed_b64)
                     sanitized_content = json.dumps({"processed_image": True})
+                    logging.info(
+                        "Updated _current_image_b64 to processed result: %s", _img_tag(processed_b64)
+                    )
             except Exception:
                 logging.exception("Failed to parse tool result")
 
@@ -519,12 +532,30 @@ class ChatResponse(BaseModel):
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     lc_messages = []
-    latest_image = None
+
+    # Extract image only from the MOST RECENT user message.
+    # Older user messages may still carry stale image_base64 from previous
+    # requests; iterating forward and taking the last match would silently
+    # fall back to a prior image whenever the newest message has no upload,
+    # causing request N to process the wrong image.
+    latest_image: Optional[str] = None
+    for msg in reversed(request.messages):
+        if msg.role == "user":
+            latest_image = msg.image_base64  # None if this message has no upload
+            break
+
+    user_img_positions = [
+        i for i, m in enumerate(request.messages)
+        if m.role == "user" and m.image_base64
+    ]
+    logging.info(
+        "Request: %d messages; user messages with image at positions %s; latest image: %s",
+        len(request.messages), user_img_positions, _img_tag(latest_image),
+    )
 
     for msg in request.messages:
         if msg.role == "user":
             if msg.image_base64:
-                latest_image = msg.image_base64  # never forwarded to LLM
                 marker = "[User uploaded an image.]"
                 user_text = msg.content.strip()
 
@@ -534,8 +565,10 @@ def chat(request: ChatRequest):
                     content = marker
                 lc_messages.append(HumanMessage(content=content))
 
+    logging.info("Setting _current_image_b64: %s", _img_tag(latest_image))
     token_img = _current_image_b64.set(latest_image)
     token_key = _annotated_image_s3_key.set(None)
+    logging.info("Reset _processed_image_b64 to None for new request")
     token_proc = _processed_image_b64.set(None)
     try:
         response_text, tokens_used = run_agent(lc_messages)
