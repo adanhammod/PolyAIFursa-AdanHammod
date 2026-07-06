@@ -283,11 +283,12 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
             tool_fn = TOOLS[tool_call["name"]]
             logging.info("Calling tool: %s", tool_call["name"])
             tool_result = tool_fn.invoke(tool_call)  # returns a ToolMessage
-            messages.append(tool_result)
 
-            # LangChain invokes tools in a copied context, so ContextVar.set() inside
-            # the tool is invisible to chat(). Extract side-effect data from the
-            # ToolMessage here, where we share the same context as the caller.
+            # Extract side-effect data and strip image base64 before adding to
+            # LLM context — raw base64 exceeds Bedrock's context length limit.
+            # LangChain invokes tools in a copied context, so ContextVar.set()
+            # inside the tool is invisible here; we read from the ToolMessage.
+            sanitized_content = tool_result.content
             try:
                 payload = json.loads(tool_result.content)
                 logging.info("Tool result keys: %s", list(payload.keys()))
@@ -299,10 +300,15 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
                 if processed_b64:
                     _current_image_b64.set(processed_b64)
                     _processed_image_b64.set(processed_b64)
+                    sanitized_content = json.dumps({"processed_image": True})
             except Exception:
                 logging.exception(
                     "Failed to parse tool result for annotated_image_s3_key"
                 )
+
+            messages.append(
+                ToolMessage(content=sanitized_content, tool_call_id=tool_result.tool_call_id)
+            )
 
 
 app = FastAPI(title="Vision Agent", lifespan=lifespan)

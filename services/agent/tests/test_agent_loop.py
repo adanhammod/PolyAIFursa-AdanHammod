@@ -169,6 +169,44 @@ def test_blur_request_calls_blur_not_detect_objects():
     mock_detect.invoke.assert_not_called()
 
 
+def test_processed_b64_stripped_from_llm_messages():
+    """processed_image_b64 must not appear in any messages sent to llm_with_tools.invoke()."""
+    large_b64 = "A" * 500  # simulates a large processed image
+    tool_response = _ai_msg(
+        content="",
+        tool_calls=[{"name": "blur", "id": "call_b", "args": {"radius": 2.0}}],
+        usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+    )
+    final_response = _ai_msg(
+        "Blurred.",
+        usage={"input_tokens": 8, "output_tokens": 2, "total_tokens": 10},
+    )
+    mock_blur = MagicMock()
+    mock_blur.invoke.return_value = _fake_tool_result(
+        {"processed_image_b64": large_b64}, call_id="call_b"
+    )
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"blur": mock_blur}),
+    ):
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        text, _ = agent_app.run_agent([HumanMessage(content="blur the image")])
+
+    assert text == "Blurred."
+    assert mock_llm.invoke.call_count == 2
+
+    # Verify large_b64 absent from every message in every invoke call
+    all_content = " ".join(
+        m.content
+        for call in mock_llm.invoke.call_args_list
+        for m in call.args[0]
+        if hasattr(m, "content") and isinstance(m.content, str)
+    )
+    assert large_b64 not in all_content
+    assert '"processed_image": true' in all_content.lower() or "processed_image" in all_content
+
+
 def test_max_iterations_exceeded():
     looping_response = _ai_msg(
         content="",
