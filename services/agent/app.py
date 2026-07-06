@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -132,6 +133,17 @@ _JSON_TYPE_MAP: dict[str, type] = {
     "object": dict,
 }
 
+# Bedrock toolUse.name must match ^[a-zA-Z][a-zA-Z0-9_]*$.
+_INVALID_TOOL_CHAR = re.compile(r"[^a-zA-Z0-9_]")
+
+
+def _sanitize_tool_name(name: str) -> str:
+    """Replace characters disallowed by Bedrock's toolUse.name constraint."""
+    safe = _INVALID_TOOL_CHAR.sub("_", name)
+    if safe and not safe[0].isalpha():
+        safe = "t_" + safe
+    return safe
+
 
 def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
     """Build a sync LangChain tool from a discovered MCP tool.
@@ -143,7 +155,10 @@ def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
     v0.3+ returns via tool.inputSchema) or a Pydantic model class.  Both are
     handled so the wrapper works regardless of adapter version.
     """
-    tool_name = mcp_tool.name
+    tool_name = mcp_tool.name          # original MCP name — used for _call_mcp
+    safe_name = _sanitize_tool_name(tool_name)
+    if safe_name != tool_name:
+        logging.info("Tool name sanitized for Bedrock: %r → %r", tool_name, safe_name)
     schema = mcp_tool.args_schema
 
     schema_fields: dict[str, Any] = {}
@@ -179,7 +194,7 @@ def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
         return json.dumps({"processed_image_b64": result_b64})
 
     return StructuredTool.from_function(
-        name=tool_name,
+        name=safe_name,   # Bedrock-safe; _call_mcp still uses original tool_name
         description=mcp_tool.description or f"Apply {tool_name} to the user's image.",
         func=_run,
         args_schema=DynSchema,
@@ -223,12 +238,14 @@ async def _init_tools() -> None:
         }
     )
     mcp_tools = await client.get_tools()
+    logging.info("MCP raw tool names from get_tools(): %s", [t.name for t in mcp_tools])
     image_proc_tools = [_build_image_proc_wrapper(t) for t in mcp_tools]
     all_tools = [detect_objects] + image_proc_tools
     TOOLS = {t.name: t for t in all_tools}
+    logging.info("Tools bound to LLM: %s", [t.name for t in all_tools])
     llm_with_tools = llm.bind_tools(all_tools)
     logging.info(
-        "MCP tools discovered: %s",
+        "MCP tools discovered (sanitized names): %s",
         [t.name for t in image_proc_tools],
     )
 

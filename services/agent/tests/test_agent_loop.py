@@ -297,3 +297,50 @@ def test_detect_objects_still_present_after_discovery():
     _run_init_tools_with_mock(fake_tools)
     assert "detect_objects" in agent_app.TOOLS
     assert agent_app.TOOLS["detect_objects"] is agent_app.detect_objects
+
+
+# ---------------------------------------------------------------------------
+# Tool name sanitization tests
+# ---------------------------------------------------------------------------
+
+def test_sanitize_tool_name_clean():
+    """Valid names are returned unchanged."""
+    assert agent_app._sanitize_tool_name("rotate") == "rotate"
+    assert agent_app._sanitize_tool_name("add_noise") == "add_noise"
+    assert agent_app._sanitize_tool_name("detect_objects") == "detect_objects"
+
+
+def test_sanitize_tool_name_hyphens():
+    """Hyphens are replaced with underscores."""
+    assert agent_app._sanitize_tool_name("img-proc_blur") == "img_proc_blur"
+    assert agent_app._sanitize_tool_name("some-tool") == "some_tool"
+
+
+def test_sanitize_tool_name_leading_digit():
+    """Names starting with a digit get a 't_' prefix."""
+    assert agent_app._sanitize_tool_name("123tool").startswith("t_")
+
+
+def test_hyphenated_mcp_name_sanitized_in_tools():
+    """If MCP returns a hyphenated tool name, TOOLS uses the sanitized version."""
+    fake_tool = _make_fake_mcp_tool("img-proc_blur")
+    _run_init_tools_with_mock([fake_tool])
+    assert "img_proc_blur" in agent_app.TOOLS
+    assert "img-proc_blur" not in agent_app.TOOLS
+
+
+def test_sanitized_tool_still_calls_mcp_with_original_name(monkeypatch):
+    """The wrapper invokes _call_mcp with the original MCP tool name, not the sanitized name."""
+    calls = []
+    monkeypatch.setattr(agent_app, "_call_mcp", lambda name, args: calls.append(name) or "ZmFrZQ==")
+    monkeypatch.setattr(agent_app, "_current_image_b64", type(agent_app._current_image_b64)("_current_image_b64", default="dGVzdA=="))
+
+    fake_tool = _make_fake_mcp_tool("img-proc_blur")
+    _run_init_tools_with_mock([fake_tool])
+
+    wrapper = agent_app.TOOLS.get("img_proc_blur")
+    assert wrapper is not None, "sanitized name not in TOOLS"
+    # Invoke the underlying function directly to bypass ContextVar issues
+    agent_app._current_image_b64.set("dGVzdA==")
+    wrapper.func()
+    assert calls == ["img-proc_blur"]
