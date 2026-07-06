@@ -151,13 +151,20 @@ def _run_init_tools_with_mock(fake_tools):
         asyncio.run(agent_app._init_tools())
 
 
-def _make_fake_mcp_tool(name: str, extra_fields=None):
+def _make_fake_mcp_tool(name: str, extra_properties: dict | None = None):
+    """Build a fake MCP tool using the JSON Schema dict format that
+    langchain-mcp-adapters v0.3+ actually returns."""
     t = MagicMock()
     t.name = name
     t.description = f"Apply {name} to the image."
-    schema = MagicMock()
-    schema.model_fields = extra_fields or {}
-    t.args_schema = schema
+    properties = {"image_b64": {"type": "string"}}
+    if extra_properties:
+        properties.update(extra_properties)
+    t.args_schema = {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties.keys()),
+    }
     return t
 
 

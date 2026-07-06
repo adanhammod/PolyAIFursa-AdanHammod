@@ -114,22 +114,52 @@ def detect_objects() -> str:
     return json.dumps(result)
 
 
+# Map JSON Schema primitive types to Python types used in create_model().
+_JSON_TYPE_MAP: dict[str, type] = {
+    "string": str,
+    "number": float,
+    "integer": int,
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+
+
 def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
     """Build a sync LangChain tool from a discovered MCP tool.
 
     Strips `image_b64` from the LLM-visible schema and injects it from the
     request-scoped ContextVar at call time.
+
+    args_schema can be either a raw JSON Schema dict (what langchain-mcp-adapters
+    v0.3+ returns via tool.inputSchema) or a Pydantic model class.  Both are
+    handled so the wrapper works regardless of adapter version.
     """
     tool_name = mcp_tool.name
-    orig_fields = mcp_tool.args_schema.model_fields
+    schema = mcp_tool.args_schema
 
     schema_fields: dict[str, Any] = {}
-    for fname, fi in orig_fields.items():
-        if fname == "image_b64":
-            continue
-        annotation = fi.annotation if fi.annotation is not None else Any
-        default = fi.default if not fi.is_required() else ...
-        schema_fields[fname] = (annotation, default)
+    if isinstance(schema, dict):
+        # JSON Schema dict — current langchain-mcp-adapters behaviour:
+        # convert_mcp_tool_to_langchain_tool() sets args_schema=tool.inputSchema
+        # which is the raw MCP protocol dict, e.g.
+        # {"type": "object", "properties": {"angle": {"type": "number"}}, "required": ["angle"]}
+        properties = schema.get("properties", {})
+        required = set(schema.get("required", []))
+        for fname, prop in properties.items():
+            if fname == "image_b64":
+                continue
+            py_type = _JSON_TYPE_MAP.get(prop.get("type", ""), Any)
+            default = ... if fname in required else prop.get("default", None)
+            schema_fields[fname] = (py_type, default)
+    else:
+        # Pydantic model class — other adapters or future versions
+        for fname, fi in schema.model_fields.items():
+            if fname == "image_b64":
+                continue
+            annotation = fi.annotation if fi.annotation is not None else Any
+            default = fi.default if not fi.is_required() else ...
+            schema_fields[fname] = (annotation, default)
 
     DynSchema = create_model(f"{tool_name}_Schema", **schema_fields)
 

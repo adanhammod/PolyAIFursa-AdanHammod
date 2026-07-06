@@ -26,11 +26,14 @@ def _make_fake_mcp_tool(name: str) -> MagicMock:
     t = MagicMock()
     t.name = name
     t.description = f"Apply {name} to the user's image."
-    schema = MagicMock()
-    # No extra fields beyond image_b64; the wrapper strips image_b64, leaving
-    # an empty schema (which is fine — the LLM just calls the tool with no args).
-    schema.model_fields = {}
-    t.args_schema = schema
+    # Use a JSON Schema dict — this matches what langchain-mcp-adapters v0.3+
+    # actually returns (convert_mcp_tool_to_langchain_tool sets args_schema to
+    # tool.inputSchema, which is the raw MCP protocol dict).
+    t.args_schema = {
+        "type": "object",
+        "properties": {"image_b64": {"type": "string"}},
+        "required": ["image_b64"],
+    }
     return t
 
 
