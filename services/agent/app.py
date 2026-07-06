@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import json
@@ -21,6 +22,8 @@ logging.getLogger("langchain").setLevel(logging.DEBUG)
 logging.getLogger("langchain_core").setLevel(logging.DEBUG)
 
 import httpx
+from mcp import ClientSession
+from mcp.client.sse import sse_client
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
@@ -30,6 +33,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel
 
 YOLO_SERVICE_URL = os.environ.get("YOLO_SERVICE_URL", "http://localhost:8080")
+IMG_PROC_MCP_URL = os.environ.get("IMG_PROC_MCP_URL", "http://127.0.0.1:5000")
 MODEL = os.environ.get("MODEL")
 
 # Text-only models
@@ -53,6 +57,7 @@ if MODEL not in ALLOWED_MODELS:
 SYSTEM_PROMPT = (
     "You are an AI vision assistant. You help users understand and analyze images. "
     "Use the available tools to extract information from images. "
+    "You can also rotate the image using the rotate_image tool before analyzing it."
 )
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -65,6 +70,26 @@ _current_image_b64: ContextVar[Optional[str]] = ContextVar(
 _annotated_image_s3_key: ContextVar[Optional[str]] = ContextVar(
     "annotated_image_s3_key", default=None
 )
+_processed_image_b64: ContextVar[Optional[str]] = ContextVar(
+    "processed_image_b64", default=None
+)
+
+
+def _call_mcp(tool_name: str, arguments: dict) -> str:
+    """Call a tool on the img-proc-mcp SSE server synchronously.
+
+    Uses asyncio.run() because the MCP SDK client is fully async while the
+    agent's tool execution is synchronous. Note: this will break if called
+    from inside an already-running event loop (e.g. async FastAPI endpoints).
+    """
+    async def _inner() -> str:
+        async with sse_client(f"{IMG_PROC_MCP_URL}/sse") as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+                return result.content[0].text
+
+    return asyncio.run(_inner())
 
 
 @tool
@@ -93,8 +118,21 @@ def detect_objects() -> str:
     return json.dumps(result)
 
 
+@tool
+def rotate_image(angle: float) -> str:
+    """Rotate the user's image by the given angle in degrees."""
+    image_b64 = _current_image_b64.get()
+    if not image_b64:
+        return json.dumps({"error": "No image was provided by the user."})
+    result_b64 = _call_mcp("rotate", {"image_b64": image_b64, "angle": angle})
+    return json.dumps({"processed_image_b64": result_b64})
+
+
 # Registry: map tool name -> tool function
-TOOLS = {detect_objects.name: detect_objects}
+TOOLS = {
+    detect_objects.name: detect_objects,
+    rotate_image.name: rotate_image,
+}
 
 rate_limiter = InMemoryRateLimiter(
     requests_per_second=0.5,
@@ -164,13 +202,17 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
             messages.append(tool_result)
 
             # LangChain invokes tools in a copied context, so ContextVar.set() inside
-            # the tool is invisible to chat(). Extract the key from the ToolMessage here,
-            # where we share the same context as the caller.
+            # the tool is invisible to chat(). Extract side-effect data from the
+            # ToolMessage here, where we share the same context as the caller.
             try:
                 payload = json.loads(tool_result.content)
                 annotated_key = payload.get("annotated_image_s3_key")
                 if annotated_key:
                     _annotated_image_s3_key.set(annotated_key)
+                processed_b64 = payload.get("processed_image_b64")
+                if processed_b64:
+                    _current_image_b64.set(processed_b64)
+                    _processed_image_b64.set(processed_b64)
             except Exception:
                 logging.exception(
                     "Failed to parse tool result for annotated_image_s3_key"
@@ -228,6 +270,7 @@ def chat(request: ChatRequest):
 
     token_img = _current_image_b64.set(latest_image)
     token_key = _annotated_image_s3_key.set(None)
+    token_proc = _processed_image_b64.set(None)
     try:
         response_text, tokens_used = run_agent(lc_messages)
         annotated_image_b64 = None
@@ -259,6 +302,7 @@ def chat(request: ChatRequest):
     finally:
         _current_image_b64.reset(token_img)
         _annotated_image_s3_key.reset(token_key)
+        _processed_image_b64.reset(token_proc)
 
 
 @app.get("/health")
@@ -269,4 +313,4 @@ def health():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, loop="asyncio")

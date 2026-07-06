@@ -8,7 +8,8 @@ langchain-aws
 
 httpx
 pydantic
+boto3
+mcp
 pytest
 pytest-asyncio
 pytest-cov
-boto3
