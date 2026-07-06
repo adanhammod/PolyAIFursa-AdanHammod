@@ -145,6 +145,30 @@ def _sanitize_tool_name(name: str) -> str:
     return safe
 
 
+# Bedrock toolUse.name pattern for runtime validation of LLM-returned names.
+_VALID_TC_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_VALID_TC_NAME_PREFIX_RE = re.compile(r"^[a-zA-Z0-9_-]+")
+
+
+def _clean_tool_call_name(raw: str) -> str | None:
+    """Return a Bedrock-valid name from a raw LLM-generated tool call name.
+
+    Some models hallucinate garbage after the tool name, e.g.
+    'rotate<|channel|>commentary'. Bedrock rejects assistant messages whose
+    toolUse.name falls outside [a-zA-Z0-9_-]+ in subsequent conversation turns.
+
+    Returns the leading valid segment, or None if no valid prefix exists.
+    """
+    if _VALID_TC_NAME_RE.match(raw):
+        return raw
+    m = _VALID_TC_NAME_PREFIX_RE.match(raw)
+    if m:
+        logging.warning("Malformed tool name %r — truncated to %r", raw, m.group())
+        return m.group()
+    logging.error("Unrecoverable tool name from LLM: %r — call dropped", raw)
+    return None
+
+
 def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
     """Build a sync LangChain tool from a discovered MCP tool.
 
