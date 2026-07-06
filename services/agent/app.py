@@ -332,11 +332,11 @@ def chat(request: ChatRequest):
     for msg in request.messages:
         if msg.role == "user":
             if msg.image_base64:
-                latest_image = msg.image_base64  # saved for detect_objects tool
-                content = (
-                    msg.content
-                    + "\n[An image was uploaded. Use existing tools to analyze it according to user instructions.]"
-                )
+                latest_image = msg.image_base64  # stored in _current_image_b64 for tools
+                # Never forward the raw base64 to the LLM — it overflows the context
+                # window and leaks image bytes into the prompt.  Use a short marker
+                # instead; tools read the image via _current_image_b64.
+                content = "[User uploaded an image.]"
             else:
                 content = msg.content
             lc_messages.append(HumanMessage(content=content))

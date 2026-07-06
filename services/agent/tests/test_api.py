@@ -70,3 +70,43 @@ def test_chat_with_image_uploads_to_s3_and_returns_annotated():
     assert data["response"] == "I found 0 objects."
     assert data["tokens_used"] == {"input": 11, "output": 6, "total": 17}
     assert data["annotated_image_base64"] == base64.b64encode(annotated_bytes).decode()
+
+
+def test_image_base64_never_reaches_llm():
+    """Raw base64 must not appear in any message passed to llm_with_tools.invoke().
+
+    Regression guard: some frontends embed the image data in the content field as
+    well as image_base64.  The /chat endpoint must strip it and replace the whole
+    content with a short text marker before the message enters run_agent / LLM.
+    """
+    image_b64 = base64.b64encode(b"definitely-not-safe-to-send-to-llm").decode()
+
+    captured_messages: list = []
+
+    def capture_run_agent(messages, **kwargs):
+        captured_messages.extend(messages)
+        return "OK.", {"input": 0, "output": 0, "total": 0}
+
+    with patch("app.run_agent", side_effect=capture_run_agent):
+        resp = client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        # Simulate a misbehaving frontend that puts base64 in content
+                        # as well as image_base64.
+                        "content": image_b64,
+                        "image_base64": image_b64,
+                    }
+                ]
+            },
+        )
+
+    assert resp.status_code == 200
+    assert captured_messages, "run_agent was never called"
+    for msg in captured_messages:
+        text = msg.content if isinstance(msg.content, str) else str(msg.content)
+        assert image_b64 not in text, (
+            f"Raw base64 found in {type(msg).__name__} passed to the LLM"
+        )
