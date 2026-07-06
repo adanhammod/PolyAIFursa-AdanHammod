@@ -67,7 +67,18 @@ SYSTEM_PROMPT = (
     "- Use 'add_noise' when the user asks to add noise to the image.\n"
     "- Use 'detect_objects' ONLY when the user asks to analyze, detect, identify, "
     "count, or describe objects in the image.\n"
-    "Do NOT call detect_objects for image-processing requests."
+    "Do NOT call detect_objects for image-processing requests.\n\n"
+    "Response format:\n"
+    "- For image-processing tools (rotate, blur, flip, resize, crop, add_noise): "
+    "respond with ONE short sentence describing the completed action. "
+    "Example: 'Done! I rotated the image 90° clockwise.'\n"
+    "- For detect_objects: summarize detected objects naturally in 1–2 sentences. "
+    "Example: 'I found 5 people and 4 cars in the image.'\n"
+    "- Include confidence scores or bounding boxes ONLY if the user explicitly requests them.\n"
+    "- Do NOT generate: markdown image links, 'Annotated image' labels, "
+    "'Rotated image' labels, placeholder captions, raw base64, or URLs.\n"
+    "- The frontend displays the processed image automatically — do not mention it in text.\n"
+    "- Keep responses under 2–3 sentences unless the user explicitly asks for detail."
 )
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -137,6 +148,14 @@ _JSON_TYPE_MAP: dict[str, type] = {
     "array": list,
     "object": dict,
 }
+
+# Standalone image-label lines the LLM emits after MCP tool calls,
+# e.g. "Rotated image", "Blurred image.". Stripped from response text
+# when the actual image is being returned in annotated_image_base64.
+_IMAGE_LABEL_RE = re.compile(
+    r'^\s*(?:annotated|rotated?|blurred?|flipped?|resized?|cropped?|processed)\s+image[.!:]*\s*$',
+    re.IGNORECASE,
+)
 
 # Bedrock toolUse.name must match ^[a-zA-Z][a-zA-Z0-9_]*$.
 _INVALID_TOOL_CHAR = re.compile(r"[^a-zA-Z0-9_]")
@@ -497,7 +516,9 @@ def chat(request: ChatRequest):
         annotated_image_b64 = None
 
         annotated_key = _annotated_image_s3_key.get()
-        logging.info("Annotated image S3 key: %s", annotated_key)
+        processed_b64 = _processed_image_b64.get()
+        logging.info("Annotated image S3 key: %s | processed_b64 present: %s",
+                     annotated_key, bool(processed_b64))
 
         response_text = "\n".join(
             line
@@ -505,6 +526,7 @@ def chat(request: ChatRequest):
             if "Annotated image:" not in line
             and "http://localhost:8080/prediction/" not in line
             and (not annotated_key or annotated_key not in line)
+            and (not processed_b64 or not _IMAGE_LABEL_RE.match(line))
         ).strip()
 
         if annotated_key:
@@ -517,10 +539,8 @@ def chat(request: ChatRequest):
 
         # MCP image-processing tools (rotate, blur, etc.) return base64 directly —
         # they do not write to S3, so annotated_key is None for these calls.
-        if not annotated_image_b64:
-            processed_b64 = _processed_image_b64.get()
-            if processed_b64:
-                annotated_image_b64 = processed_b64
+        if not annotated_image_b64 and processed_b64:
+            annotated_image_b64 = processed_b64
 
         logging.info(
             "annotated_image_base64 present: %s", annotated_image_b64 is not None

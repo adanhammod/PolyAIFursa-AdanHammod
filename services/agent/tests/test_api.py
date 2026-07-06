@@ -290,3 +290,49 @@ def test_processed_image_returned_in_chat_response():
     assert resp.status_code == 200
     data = resp.json()
     assert data["annotated_image_base64"] == processed_b64
+
+
+def test_image_label_stripped_from_response_when_mcp_image_returned():
+    """Standalone MCP labels ('Rotated image') must be stripped when an image is returned."""
+    fake_b64 = base64.b64encode(b"img").decode()
+    processed_b64 = "cmVzdWx0X2ltYWdl"
+
+    tool_response = MagicMock(spec=AIMessage)
+    tool_response.content = ""
+    tool_response.tool_calls = [{"name": "rotate", "id": "c4", "args": {"angle": 90.0}}]
+    tool_response.usage_metadata = {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+
+    final_response = MagicMock(spec=AIMessage)
+    final_response.content = "I rotated the image 90 degrees.\nRotated image"
+    final_response.tool_calls = []
+    final_response.usage_metadata = {"input_tokens": 8, "output_tokens": 4, "total_tokens": 12}
+
+    mock_rotate = MagicMock()
+    mock_rotate.invoke.return_value = ToolMessage(
+        content=f'{{"processed_image_b64":"{processed_b64}"}}',
+        tool_call_id="c4",
+    )
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"rotate": mock_rotate}),
+    ):
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        resp = client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "rotate the image 90",
+                        "image_base64": fake_b64,
+                    }
+                ]
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "Rotated image" not in data["response"]
+    assert "I rotated the image 90 degrees." in data["response"]
+    assert data["annotated_image_base64"] == processed_b64
