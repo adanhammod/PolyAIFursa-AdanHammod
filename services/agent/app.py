@@ -6,6 +6,7 @@ import os
 import uuid
 from contextvars import ContextVar
 from typing import Optional
+from prometheus_fastapi_instrumentator import Instrumentator
 
 import boto3
 
@@ -178,6 +179,7 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
 
 
 app = FastAPI(title="Vision Agent")
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 app.add_middleware(
     CORSMiddleware,
