@@ -1,7 +1,7 @@
 import base64
 import json
 from unittest.mock import MagicMock, patch
-
+from prometheus_fastapi_instrumentator import Instrumentator
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -257,12 +257,20 @@ def test_processed_image_returned_in_chat_response():
     tool_response = MagicMock(spec=AIMessage)
     tool_response.content = ""
     tool_response.tool_calls = [{"name": "blur", "id": "c3", "args": {"radius": 2.0}}]
-    tool_response.usage_metadata = {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+    tool_response.usage_metadata = {
+        "input_tokens": 5,
+        "output_tokens": 2,
+        "total_tokens": 7,
+    }
 
     final_response = MagicMock(spec=AIMessage)
     final_response.content = "Blurred."
     final_response.tool_calls = []
-    final_response.usage_metadata = {"input_tokens": 8, "output_tokens": 2, "total_tokens": 10}
+    final_response.usage_metadata = {
+        "input_tokens": 8,
+        "output_tokens": 2,
+        "total_tokens": 10,
+    }
 
     mock_blur = MagicMock()
     mock_blur.invoke.return_value = ToolMessage(
@@ -301,12 +309,20 @@ def test_image_label_stripped_from_response_when_mcp_image_returned():
     tool_response = MagicMock(spec=AIMessage)
     tool_response.content = ""
     tool_response.tool_calls = [{"name": "rotate", "id": "c4", "args": {"angle": 90.0}}]
-    tool_response.usage_metadata = {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+    tool_response.usage_metadata = {
+        "input_tokens": 5,
+        "output_tokens": 2,
+        "total_tokens": 7,
+    }
 
     final_response = MagicMock(spec=AIMessage)
     final_response.content = "I rotated the image 90 degrees.\nRotated image"
     final_response.tool_calls = []
-    final_response.usage_metadata = {"input_tokens": 8, "output_tokens": 4, "total_tokens": 12}
+    final_response.usage_metadata = {
+        "input_tokens": 8,
+        "output_tokens": 4,
+        "total_tokens": 12,
+    }
 
     mock_rotate = MagicMock()
     mock_rotate.invoke.return_value = ToolMessage(
@@ -342,12 +358,18 @@ def test_image_label_stripped_from_response_when_mcp_image_returned():
 def test_frontend_response_never_contains_reasoning_content():
     """The /chat response field must never expose raw reasoning_content to the frontend."""
     llm_content = [
-        {"type": "reasoning_content", "reasoning_content": {"text": "secret reasoning"}},
+        {
+            "type": "reasoning_content",
+            "reasoning_content": {"text": "secret reasoning"},
+        },
         {"type": "text", "text": "Here is your answer."},
     ]
 
     def fake_run_agent(_messages):
-        return (agent_app._extract_visible_text(llm_content), {"input": 1, "output": 1, "total": 2})
+        return (
+            agent_app._extract_visible_text(llm_content),
+            {"input": 1, "output": 1, "total": 2},
+        )
 
     with patch("app.run_agent", side_effect=fake_run_agent):
         resp = client.post(
@@ -376,7 +398,11 @@ def test_consecutive_requests_use_different_images():
         # Request 1: single user message with imageA
         client.post(
             "/chat",
-            json={"messages": [{"role": "user", "content": "blur", "image_base64": imageA}]},
+            json={
+                "messages": [
+                    {"role": "user", "content": "blur", "image_base64": imageA}
+                ]
+            },
         )
         # Request 2: history includes old user msg with imageA; newest user msg has imageB
         client.post(
@@ -430,6 +456,7 @@ def test_new_request_without_upload_does_not_fall_back_to_old_image():
 # ---------------------------------------------------------------------------
 # Helpers for tests that exercise the MCP code path via mock_call_mcp
 # ---------------------------------------------------------------------------
+
 
 def _ai_tool_call(tool_name: str, call_id: str) -> MagicMock:
     msg = MagicMock(spec=AIMessage)
@@ -489,15 +516,27 @@ def test_consecutive_mcp_calls_use_different_images(mock_call_mcp):
         patch.dict(agent_app.TOOLS, {"blur": blur, "rotate": rotate}),
     ):
         mock_llm.invoke.side_effect = [
-            _ai_tool_call("blur", "c1"), _ai_final("Done! I blurred the image."),
-            _ai_tool_call("rotate", "c2"), _ai_final("Done! I rotated the image 90° clockwise."),
+            _ai_tool_call("blur", "c1"),
+            _ai_final("Done! I blurred the image."),
+            _ai_tool_call("rotate", "c2"),
+            _ai_final("Done! I rotated the image 90° clockwise."),
         ]
-        client.post("/chat", json={"messages": [
-            {"role": "user", "content": "blur", "image_base64": imageA}
-        ]})
-        client.post("/chat", json={"messages": [
-            {"role": "user", "content": "rotate", "image_base64": imageB}
-        ]})
+        client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "blur", "image_base64": imageA}
+                ]
+            },
+        )
+        client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "rotate", "image_base64": imageB}
+                ]
+            },
+        )
 
     assert len(mcp_inputs) == 2
     assert mcp_inputs[0] == imageA, "Request 1 must pass imageA to MCP"
@@ -518,15 +557,27 @@ def test_second_request_response_excludes_first_response_text(mock_call_mcp):
         patch.dict(agent_app.TOOLS, {"blur": blur, "rotate": rotate}),
     ):
         mock_llm.invoke.side_effect = [
-            _ai_tool_call("blur", "c1"), _ai_final("Done! I blurred the image."),
-            _ai_tool_call("rotate", "c2"), _ai_final("Done! I rotated the image 90° clockwise."),
+            _ai_tool_call("blur", "c1"),
+            _ai_final("Done! I blurred the image."),
+            _ai_tool_call("rotate", "c2"),
+            _ai_final("Done! I rotated the image 90° clockwise."),
         ]
-        client.post("/chat", json={"messages": [
-            {"role": "user", "content": "blur", "image_base64": imageA}
-        ]})
-        resp2 = client.post("/chat", json={"messages": [
-            {"role": "user", "content": "rotate", "image_base64": imageB}
-        ]})
+        client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "blur", "image_base64": imageA}
+                ]
+            },
+        )
+        resp2 = client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "rotate", "image_base64": imageB}
+                ]
+            },
+        )
 
     data2 = resp2.json()
     assert "blurred" not in data2["response"].lower(), (
@@ -554,16 +605,30 @@ def test_second_request_annotated_image_differs_from_first(mock_call_mcp):
         patch.dict(agent_app.TOOLS, {"blur": blur, "rotate": rotate}),
     ):
         mock_llm.invoke.side_effect = [
-            _ai_tool_call("blur", "c1"), _ai_final("Done! I blurred the image."),
-            _ai_tool_call("rotate", "c2"), _ai_final("Done! I rotated the image 90° clockwise."),
+            _ai_tool_call("blur", "c1"),
+            _ai_final("Done! I blurred the image."),
+            _ai_tool_call("rotate", "c2"),
+            _ai_final("Done! I rotated the image 90° clockwise."),
         ]
-        resp1 = client.post("/chat", json={"messages": [
-            {"role": "user", "content": "blur", "image_base64": imageA}
-        ]})
-        resp2 = client.post("/chat", json={"messages": [
-            {"role": "user", "content": "rotate", "image_base64": imageB}
-        ]})
+        resp1 = client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "blur", "image_base64": imageA}
+                ]
+            },
+        )
+        resp2 = client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "rotate", "image_base64": imageB}
+                ]
+            },
+        )
 
     assert resp1.json()["annotated_image_base64"] == processedA
     assert resp2.json()["annotated_image_base64"] == processedB
-    assert resp1.json()["annotated_image_base64"] != resp2.json()["annotated_image_base64"]
+    assert (
+        resp1.json()["annotated_image_base64"] != resp2.json()["annotated_image_base64"]
+    )
