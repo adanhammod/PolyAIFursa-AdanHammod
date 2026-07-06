@@ -286,6 +286,7 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
             tool_fn = TOOLS[tool_call["name"]]
+            logging.info("Calling tool: %s", tool_call["name"])
             tool_result = tool_fn.invoke(tool_call)  # returns a ToolMessage
             messages.append(tool_result)
 
@@ -294,10 +295,12 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
             # ToolMessage here, where we share the same context as the caller.
             try:
                 payload = json.loads(tool_result.content)
+                logging.info("Tool result keys: %s", list(payload.keys()))
                 annotated_key = payload.get("annotated_image_s3_key")
                 if annotated_key:
                     _annotated_image_s3_key.set(annotated_key)
                 processed_b64 = payload.get("processed_image_b64")
+                logging.info("processed_image_b64 detected: %s", bool(processed_b64))
                 if processed_b64:
                     _current_image_b64.set(processed_b64)
                     _processed_image_b64.set(processed_b64)
@@ -381,6 +384,14 @@ def chat(request: ChatRequest):
             except Exception:
                 logging.exception("Failed to fetch annotated image from S3")
 
+        # MCP image-processing tools (rotate, blur, etc.) return base64 directly —
+        # they do not write to S3, so annotated_key is None for these calls.
+        if not annotated_image_b64:
+            processed_b64 = _processed_image_b64.get()
+            if processed_b64:
+                annotated_image_b64 = processed_b64
+
+        logging.info("annotated_image_base64 present: %s", annotated_image_b64 is not None)
         return ChatResponse(
             response=response_text,
             annotated_image_base64=annotated_image_b64,
