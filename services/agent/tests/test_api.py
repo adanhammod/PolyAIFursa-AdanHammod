@@ -336,3 +336,26 @@ def test_image_label_stripped_from_response_when_mcp_image_returned():
     assert "Rotated image" not in data["response"]
     assert "I rotated the image 90 degrees." in data["response"]
     assert data["annotated_image_base64"] == processed_b64
+
+
+def test_frontend_response_never_contains_reasoning_content():
+    """The /chat response field must never expose raw reasoning_content to the frontend."""
+    llm_content = [
+        {"type": "reasoning_content", "reasoning_content": {"text": "secret reasoning"}},
+        {"type": "text", "text": "Here is your answer."},
+    ]
+
+    def fake_run_agent(_messages):
+        return (agent_app._extract_visible_text(llm_content), {"input": 1, "output": 1, "total": 2})
+
+    with patch("app.run_agent", side_effect=fake_run_agent):
+        resp = client.post(
+            "/chat",
+            json={"messages": [{"role": "user", "content": "hello"}]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "reasoning_content" not in data["response"]
+    assert "secret reasoning" not in data["response"]
+    assert data["response"] == "Here is your answer."
