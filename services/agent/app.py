@@ -57,8 +57,16 @@ if MODEL not in ALLOWED_MODELS:
     )
 
 SYSTEM_PROMPT = (
-    "You are an AI vision assistant. Use the available tools for object detection "
-    "and image-processing operations (blur, rotate, flip, resize, crop, add_noise, etc.)."
+    "You are an AI vision assistant. Follow these tool-selection rules strictly:\n"
+    "- Use 'rotate' when the user asks to rotate the image.\n"
+    "- Use 'blur' when the user asks to blur the image.\n"
+    "- Use 'flip' when the user asks to flip or mirror the image.\n"
+    "- Use 'resize' when the user asks to resize the image.\n"
+    "- Use 'crop' when the user asks to crop the image.\n"
+    "- Use 'add_noise' when the user asks to add noise to the image.\n"
+    "- Use 'detect_objects' ONLY when the user asks to analyze, detect, identify, "
+    "count, or describe objects in the image.\n"
+    "Do NOT call detect_objects for image-processing requests."
 )
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")

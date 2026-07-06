@@ -111,6 +111,64 @@ def test_rotate_tool_call():
     assert mock_tool.invoke.call_count == 1
 
 
+def test_rotate_request_calls_rotate_not_detect_objects():
+    """'rotate the image 90' must route to 'rotate', never to 'detect_objects'."""
+    tool_response = _ai_msg(
+        content="",
+        tool_calls=[{"name": "rotate", "id": "call_r", "args": {"angle": 90.0}}],
+        usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+    )
+    final_response = _ai_msg(
+        "Rotated.",
+        usage={"input_tokens": 8, "output_tokens": 2, "total_tokens": 10},
+    )
+
+    mock_rotate = MagicMock()
+    mock_rotate.invoke.return_value = _fake_tool_result(
+        {"processed_image_b64": "ZmFrZQ=="}, call_id="call_r"
+    )
+    mock_detect = MagicMock()
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"rotate": mock_rotate, "detect_objects": mock_detect}),
+    ):
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        agent_app.run_agent([HumanMessage(content="rotate the image 90")])
+
+    mock_rotate.invoke.assert_called_once()
+    mock_detect.invoke.assert_not_called()
+
+
+def test_blur_request_calls_blur_not_detect_objects():
+    """'blur the image' must route to 'blur', never to 'detect_objects'."""
+    tool_response = _ai_msg(
+        content="",
+        tool_calls=[{"name": "blur", "id": "call_b", "args": {"radius": 2.0}}],
+        usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+    )
+    final_response = _ai_msg(
+        "Blurred.",
+        usage={"input_tokens": 8, "output_tokens": 2, "total_tokens": 10},
+    )
+
+    mock_blur = MagicMock()
+    mock_blur.invoke.return_value = _fake_tool_result(
+        {"processed_image_b64": "ZmFrZQ=="}, call_id="call_b"
+    )
+    mock_detect = MagicMock()
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"blur": mock_blur, "detect_objects": mock_detect}),
+    ):
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        agent_app.run_agent([HumanMessage(content="blur the image")])
+
+    mock_blur.invoke.assert_called_once()
+    mock_detect.invoke.assert_not_called()
+
+
 def test_max_iterations_exceeded():
     looping_response = _ai_msg(
         content="",
