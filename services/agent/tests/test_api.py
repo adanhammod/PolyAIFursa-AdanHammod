@@ -217,3 +217,48 @@ def test_rotate_with_image_routes_to_rotate_tool():
     assert resp.status_code == 200
     mock_rotate.invoke.assert_called_once()
     mock_detect.invoke.assert_not_called()
+    assert resp.json()["annotated_image_base64"] == "ZmFrZQ=="
+
+
+def test_processed_image_returned_in_chat_response():
+    """annotated_image_base64 in ChatResponse must carry the MCP-processed image."""
+    fake_b64 = base64.b64encode(b"img").decode()
+    processed_b64 = "cmVzdWx0X2ltYWdl"  # base64 for "result_image"
+
+    tool_response = MagicMock(spec=AIMessage)
+    tool_response.content = ""
+    tool_response.tool_calls = [{"name": "blur", "id": "c3", "args": {"radius": 2.0}}]
+    tool_response.usage_metadata = {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+
+    final_response = MagicMock(spec=AIMessage)
+    final_response.content = "Blurred."
+    final_response.tool_calls = []
+    final_response.usage_metadata = {"input_tokens": 8, "output_tokens": 2, "total_tokens": 10}
+
+    mock_blur = MagicMock()
+    mock_blur.invoke.return_value = ToolMessage(
+        content=f'{{"processed_image_b64":"{processed_b64}"}}',
+        tool_call_id="c3",
+    )
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"blur": mock_blur}),
+    ):
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        resp = client.post(
+            "/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "blur the image",
+                        "image_base64": fake_b64,
+                    }
+                ]
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["annotated_image_base64"] == processed_b64
