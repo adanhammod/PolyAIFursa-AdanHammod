@@ -1,6 +1,6 @@
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -18,8 +18,38 @@ _mock_llm = MagicMock()
 _mock_llm.profile = {"tool_calling": True}
 _mock_llm.bind_tools.return_value = MagicMock()
 
-with patch("langchain.chat_models.init_chat_model", return_value=_mock_llm):
-    import app  # noqa: E402
+# Fake MCP tools that mirror the real img-proc-mcp server's tool names.
+_FAKE_MCP_TOOL_NAMES = ["rotate", "flip", "blur", "resize", "crop", "add_noise"]
+
+
+def _make_fake_mcp_tool(name: str) -> MagicMock:
+    t = MagicMock()
+    t.name = name
+    t.description = f"Apply {name} to the user's image."
+    schema = MagicMock()
+    # No extra fields beyond image_b64; the wrapper strips image_b64, leaving
+    # an empty schema (which is fine — the LLM just calls the tool with no args).
+    schema.model_fields = {}
+    t.args_schema = schema
+    return t
+
+
+_fake_mcp_tools = [_make_fake_mcp_tool(n) for n in _FAKE_MCP_TOOL_NAMES]
+
+_mock_mcp_instance = MagicMock()
+_mock_mcp_instance.get_tools = AsyncMock(return_value=_fake_mcp_tools)
+_mock_mcp_client_cls = MagicMock(return_value=_mock_mcp_instance)
+
+# Patch init_chat_model so app.py never calls AWS on import.
+_llm_patcher = patch("langchain.chat_models.init_chat_model", return_value=_mock_llm)
+_llm_patcher.start()
+
+import app  # noqa: E402
+
+# Replace app.MultiServerMCPClient with the mock for the entire test session so
+# that the FastAPI lifespan (_init_tools) never dials a real MCP server.
+_mcp_patcher = patch.object(app, "MultiServerMCPClient", _mock_mcp_client_cls)
+_mcp_patcher.start()
 
 
 @pytest.fixture(autouse=True)

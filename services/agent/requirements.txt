@@ -5,6 +5,7 @@ langchain
 langgraph
 langchain-core
 langchain-aws
+langchain-mcp-adapters
 
 httpx
 pydantic
