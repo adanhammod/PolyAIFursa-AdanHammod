@@ -14,3 +14,5 @@ mcp
 pytest
 pytest-asyncio
 pytest-cov
+
+prometheus-fastapi-instrumentator
