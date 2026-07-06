@@ -1,4 +1,5 @@
 import base64
+import json
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -424,3 +425,145 @@ def test_new_request_without_upload_does_not_fall_back_to_old_image():
         "_current_image_b64 must be None when latest user message has no upload; "
         "must not fall back to old imageA"
     )
+
+
+# ---------------------------------------------------------------------------
+# Helpers for tests that exercise the MCP code path via mock_call_mcp
+# ---------------------------------------------------------------------------
+
+def _ai_tool_call(tool_name: str, call_id: str) -> MagicMock:
+    msg = MagicMock(spec=AIMessage)
+    msg.content = ""
+    msg.tool_calls = [{"name": tool_name, "id": call_id, "args": {}}]
+    msg.usage_metadata = {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+    return msg
+
+
+def _ai_final(text: str) -> MagicMock:
+    msg = MagicMock(spec=AIMessage)
+    msg.content = text
+    msg.tool_calls = []
+    msg.usage_metadata = {"input_tokens": 8, "output_tokens": 4, "total_tokens": 12}
+    return msg
+
+
+def _make_mcp_tool(tool_name: str, call_mcp) -> MagicMock:
+    """Mock tool whose invoke reads _current_image_b64 and delegates to call_mcp.
+
+    This mirrors what the real _build_image_proc_wrapper closure does, without
+    needing TOOLS to be pre-populated by the lifespan MCP discovery step.
+    """
+    mock = MagicMock()
+
+    def invoke(tool_call):
+        image_b64 = agent_app._current_image_b64.get()
+        result = call_mcp(tool_name, {"image_b64": image_b64})
+        return ToolMessage(
+            content=json.dumps({"processed_image_b64": result}),
+            tool_call_id=tool_call["id"],
+        )
+
+    mock.invoke.side_effect = invoke
+    return mock
+
+
+def test_consecutive_mcp_calls_use_different_images(mock_call_mcp):
+    """Requirement 1: each /chat request must forward its own image to _call_mcp."""
+    imageA = base64.b64encode(b"IMAGE_A").decode()
+    imageB = base64.b64encode(b"IMAGE_B").decode()
+    processedA = base64.b64encode(b"PROCESSED_A").decode()
+    processedB = base64.b64encode(b"PROCESSED_B").decode()
+
+    mcp_inputs = []
+
+    def tracking(tool_name, arguments):
+        mcp_inputs.append(arguments.get("image_b64"))
+        return processedA if arguments.get("image_b64") == imageA else processedB
+
+    mock_call_mcp.side_effect = tracking
+    blur = _make_mcp_tool("blur", mock_call_mcp)
+    rotate = _make_mcp_tool("rotate", mock_call_mcp)
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"blur": blur, "rotate": rotate}),
+    ):
+        mock_llm.invoke.side_effect = [
+            _ai_tool_call("blur", "c1"), _ai_final("Done! I blurred the image."),
+            _ai_tool_call("rotate", "c2"), _ai_final("Done! I rotated the image 90° clockwise."),
+        ]
+        client.post("/chat", json={"messages": [
+            {"role": "user", "content": "blur", "image_base64": imageA}
+        ]})
+        client.post("/chat", json={"messages": [
+            {"role": "user", "content": "rotate", "image_base64": imageB}
+        ]})
+
+    assert len(mcp_inputs) == 2
+    assert mcp_inputs[0] == imageA, "Request 1 must pass imageA to MCP"
+    assert mcp_inputs[1] == imageB, "Request 2 must pass imageB to MCP"
+    assert mcp_inputs[0] != mcp_inputs[1]
+
+
+def test_second_request_response_excludes_first_response_text(mock_call_mcp):
+    """Requirement 2: second response must not echo the first response's text."""
+    imageA = base64.b64encode(b"IMAGE_A").decode()
+    imageB = base64.b64encode(b"IMAGE_B").decode()
+    mock_call_mcp.return_value = base64.b64encode(b"PROCESSED").decode()
+    blur = _make_mcp_tool("blur", mock_call_mcp)
+    rotate = _make_mcp_tool("rotate", mock_call_mcp)
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"blur": blur, "rotate": rotate}),
+    ):
+        mock_llm.invoke.side_effect = [
+            _ai_tool_call("blur", "c1"), _ai_final("Done! I blurred the image."),
+            _ai_tool_call("rotate", "c2"), _ai_final("Done! I rotated the image 90° clockwise."),
+        ]
+        client.post("/chat", json={"messages": [
+            {"role": "user", "content": "blur", "image_base64": imageA}
+        ]})
+        resp2 = client.post("/chat", json={"messages": [
+            {"role": "user", "content": "rotate", "image_base64": imageB}
+        ]})
+
+    data2 = resp2.json()
+    assert "blurred" not in data2["response"].lower(), (
+        "Request 2 response must not contain text from request 1"
+    )
+    assert "rotated" in data2["response"].lower()
+
+
+def test_second_request_annotated_image_differs_from_first(mock_call_mcp):
+    """Requirement 3: annotated_image_base64 from request 2 must come from imageB."""
+    imageA = base64.b64encode(b"IMAGE_A").decode()
+    imageB = base64.b64encode(b"IMAGE_B").decode()
+    processedA = base64.b64encode(b"PROCESSED_A").decode()
+    processedB = base64.b64encode(b"PROCESSED_B").decode()
+
+    def tracking(tool_name, arguments):
+        return processedA if arguments.get("image_b64") == imageA else processedB
+
+    mock_call_mcp.side_effect = tracking
+    blur = _make_mcp_tool("blur", mock_call_mcp)
+    rotate = _make_mcp_tool("rotate", mock_call_mcp)
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"blur": blur, "rotate": rotate}),
+    ):
+        mock_llm.invoke.side_effect = [
+            _ai_tool_call("blur", "c1"), _ai_final("Done! I blurred the image."),
+            _ai_tool_call("rotate", "c2"), _ai_final("Done! I rotated the image 90° clockwise."),
+        ]
+        resp1 = client.post("/chat", json={"messages": [
+            {"role": "user", "content": "blur", "image_base64": imageA}
+        ]})
+        resp2 = client.post("/chat", json={"messages": [
+            {"role": "user", "content": "rotate", "image_base64": imageB}
+        ]})
+
+    assert resp1.json()["annotated_image_base64"] == processedA
+    assert resp2.json()["annotated_image_base64"] == processedB
+    assert resp1.json()["annotated_image_base64"] != resp2.json()["annotated_image_base64"]
