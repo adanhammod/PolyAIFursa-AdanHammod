@@ -86,8 +86,13 @@ _processed_image_b64: ContextVar[Optional[str]] = ContextVar(
 
 def _call_mcp(tool_name: str, arguments: dict) -> str:
     """Call a tool on the img-proc-mcp HTTP server synchronously."""
+
     async def _inner() -> str:
-        async with streamable_http_client(f"{IMG_PROC_MCP_URL}/mcp") as (read, write, _):
+        async with streamable_http_client(f"{IMG_PROC_MCP_URL}/mcp") as (
+            read,
+            write,
+            _,
+        ):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)
@@ -340,16 +345,15 @@ def chat(request: ChatRequest):
     for msg in request.messages:
         if msg.role == "user":
             if msg.image_base64:
-                latest_image = msg.image_base64  # stored in _current_image_b64 for tools
-                # Never forward the raw base64 to the LLM — it overflows the context
-                # window and leaks image bytes into the prompt.  Use a short marker
-                # instead; tools read the image via _current_image_b64.
-                content = "[User uploaded an image.]"
-            else:
-                content = msg.content
-            lc_messages.append(HumanMessage(content=content))
-        else:
-            lc_messages.append(AIMessage(content=msg.content))
+                latest_image = msg.image_base64  # never forwarded to LLM
+                marker = "[User uploaded an image.]"
+                user_text = msg.content.strip()
+
+                if user_text and user_text != msg.image_base64.strip():
+                    content = f"{marker}\n{user_text}"
+                else:
+                    content = marker
+                lc_messages.append(HumanMessage(content=content))
 
     token_img = _current_image_b64.set(latest_image)
     token_key = _annotated_image_s3_key.set(None)
