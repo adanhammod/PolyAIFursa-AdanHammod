@@ -4,10 +4,12 @@ import os
 
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
-MCP_PORT = int(os.environ.get("MCP_PORT", 8000))
-mcp = FastMCP("img-proc", port=MCP_PORT)
+
+MCP_PORT = int(os.environ.get("FASTMCP_PORT", 9000))
+
+mcp = FastMCP("img-proc")
 
 
 def _decode(image_b64: str) -> Image.Image:
@@ -81,4 +83,5 @@ def add_noise(image_b64: str, amount: float = 0.02) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    os.environ["FASTMCP_PORT"] = str(MCP_PORT)
+    mcp.run(transport="http")
