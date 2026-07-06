@@ -340,11 +340,9 @@ def chat(request: ChatRequest):
     for msg in request.messages:
         if msg.role == "user":
             if msg.image_base64:
-                latest_image = msg.image_base64  # saved for detect_objects tool
-                content = (
-                    msg.content
-                    + "\n[An image was uploaded. Use existing tools to analyze it according to user instructions.]"
-                )
+                latest_image = msg.image_base64  # never forwarded to LLM
+                marker = "[User uploaded an image.]"
+                content = f"{marker}\n{msg.content}" if msg.content.strip() else marker
             else:
                 content = msg.content
             lc_messages.append(HumanMessage(content=content))
