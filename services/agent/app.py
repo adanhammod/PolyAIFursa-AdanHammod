@@ -184,7 +184,7 @@ def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
     v0.3+ returns via tool.inputSchema) or a Pydantic model class.  Both are
     handled so the wrapper works regardless of adapter version.
     """
-    tool_name = mcp_tool.name          # original MCP name — used for _call_mcp
+    tool_name = mcp_tool.name  # original MCP name — used for _call_mcp
     safe_name = _sanitize_tool_name(tool_name)
     if safe_name != tool_name:
         logging.info("Tool name sanitized for Bedrock: %r → %r", tool_name, safe_name)
@@ -223,7 +223,7 @@ def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
         return json.dumps({"processed_image_b64": result_b64})
 
     return StructuredTool.from_function(
-        name=safe_name,   # Bedrock-safe; _call_mcp still uses original tool_name
+        name=safe_name,  # Bedrock-safe; _call_mcp still uses original tool_name
         description=mcp_tool.description or f"Apply {tool_name} to the user's image.",
         func=_run,
         args_schema=DynSchema,
@@ -307,6 +307,41 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
             )
 
         response: AIMessage = llm_with_tools.invoke(messages)
+
+        # Log raw tool_calls exactly as the LLM returned them.
+        logging.info(
+            "LLM tool_calls (raw): %s",
+            [{"name": tc["name"], "id": tc.get("id")} for tc in response.tool_calls],
+        )
+
+        # Validate and sanitize tool call names BEFORE appending to history.
+        # Root cause of Bedrock ValidationException: the LLM can emit garbage
+        # after the tool name (e.g. "rotate<|channel|>commentary"). Bedrock
+        # re-validates toolUse.name in every assistant message sent in later
+        # turns, and rejects anything outside [a-zA-Z0-9_-]+.
+        cleaned_calls: list[dict] = []
+        needs_rebuild = False
+        for tc in response.tool_calls:
+            clean = _clean_tool_call_name(tc["name"])
+            if clean is None:
+                needs_rebuild = True  # no valid prefix — drop the call
+            elif clean != tc["name"]:
+                cleaned_calls.append({**tc, "name": clean})
+                needs_rebuild = True
+            else:
+                cleaned_calls.append(tc)
+
+        if needs_rebuild:
+            response = AIMessage(
+                content=response.content,
+                tool_calls=cleaned_calls,
+                usage_metadata=response.usage_metadata,
+            )
+            logging.info(
+                "AIMessage rebuilt with sanitized names: %s",
+                [tc["name"] for tc in cleaned_calls],
+            )
+
         messages.append(response)
 
         meta = response.usage_metadata or {}
@@ -319,7 +354,7 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
             [{"name": tc["name"], "args": tc["args"]} for tc in response.tool_calls],
         )
 
-        # No tool calls, the model produced its final answer
+        # No tool calls → final answer (also covers the all-names-dropped case)
         if not response.tool_calls:
             content = response.content
             if isinstance(content, list):
@@ -331,25 +366,47 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
-            tool_name = tool_call["name"]
-            tool_args = {k: v for k, v in tool_call["args"].items() if "b64" not in k and "base64" not in k}
-            in_tools = tool_name in TOOLS
+            tool_name = tool_call["name"]  # already validated/sanitized above
+            safe_args = {
+                k: v
+                for k, v in tool_call["args"].items()
+                if "b64" not in k and "base64" not in k
+            }
             logging.info(
-                "Tool selected: %s | args: %s | in TOOLS: %s",
-                tool_name, tool_args, in_tools,
+                "Tool call: name=%r args=%s id=%s",
+                tool_name,
+                safe_args,
+                tool_call.get("id"),
             )
-            if not in_tools:
-                logging.error("Unknown tool requested: %s — available: %s", tool_name, list(TOOLS))
+
+            if tool_name not in TOOLS:
+                # Send an error ToolMessage to keep toolUse/toolResult balanced.
+                logging.error(
+                    "Unknown tool %r — available: %s", tool_name, sorted(TOOLS)
+                )
+                messages.append(
+                    ToolMessage(
+                        content=json.dumps(
+                            {
+                                "error": f"Unknown tool '{tool_name}'. Use: {sorted(TOOLS)}"
+                            }
+                        ),
+                        tool_call_id=tool_call["id"],
+                    )
+                )
                 continue
 
             tool_fn = TOOLS[tool_name]
-            logging.info("Executing tool: %s", tool_name)
             try:
                 tool_result = tool_fn.invoke(tool_call)  # returns a ToolMessage
             except Exception:
                 logging.exception("Tool execution failed: %s", tool_name)
                 raise
-            logging.info("Tool finished: %s", tool_name)
+            logging.info(
+                "Tool finished: %s | ToolMessage.tool_call_id=%s",
+                tool_name,
+                tool_result.tool_call_id,
+            )
 
             # Extract side-effect data and strip image base64 before adding to
             # LLM context — raw base64 exceeds Bedrock's context length limit.
@@ -369,13 +426,19 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
                     _processed_image_b64.set(processed_b64)
                     sanitized_content = json.dumps({"processed_image": True})
             except Exception:
-                logging.exception(
-                    "Failed to parse tool result for annotated_image_s3_key"
-                )
+                logging.exception("Failed to parse tool result")
 
-            messages.append(
-                ToolMessage(content=sanitized_content, tool_call_id=tool_result.tool_call_id)
+            tool_msg = ToolMessage(
+                content=sanitized_content, tool_call_id=tool_result.tool_call_id
             )
+            logging.info(
+                "Appending ToolMessage: tool_call_id=%s keys=%s",
+                tool_msg.tool_call_id,
+                list(json.loads(sanitized_content).keys())
+                if sanitized_content.startswith("{")
+                else "text",
+            )
+            messages.append(tool_msg)
 
 
 app = FastAPI(title="Vision Agent", lifespan=lifespan)
@@ -459,7 +522,9 @@ def chat(request: ChatRequest):
             if processed_b64:
                 annotated_image_b64 = processed_b64
 
-        logging.info("annotated_image_base64 present: %s", annotated_image_b64 is not None)
+        logging.info(
+            "annotated_image_base64 present: %s", annotated_image_b64 is not None
+        )
         return ChatResponse(
             response=response_text,
             annotated_image_base64=annotated_image_b64,

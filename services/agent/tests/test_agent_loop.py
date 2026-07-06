@@ -1,10 +1,13 @@
 import asyncio
 import json
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import app as agent_app
+
+_BEDROCK_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _ai_msg(content="", tool_calls=None, usage=None):
@@ -350,3 +353,93 @@ def test_sanitized_tool_still_calls_mcp_with_original_name(monkeypatch):
     agent_app._current_image_b64.set("dGVzdA==")
     wrapper.func()
     assert calls == ["img-proc_blur"]
+
+
+# ---------------------------------------------------------------------------
+# Bedrock toolUse.name validation — regression tests
+# ---------------------------------------------------------------------------
+
+def test_all_bound_tool_names_valid_for_bedrock():
+    """Every name in TOOLS and every name passed to bind_tools must match [a-zA-Z0-9_-]+."""
+    fake_tools = [_make_fake_mcp_tool(n) for n in ["rotate", "flip", "blur", "resize", "crop", "add_noise"]]
+    _run_init_tools_with_mock(fake_tools)
+
+    for name in agent_app.TOOLS:
+        assert _BEDROCK_NAME_RE.match(name), f"TOOLS key {name!r} invalid for Bedrock"
+
+    call_args = agent_app.llm.bind_tools.call_args
+    assert call_args is not None
+    for t in call_args[0][0]:
+        assert _BEDROCK_NAME_RE.match(t.name), f"Bound tool {t.name!r} invalid for Bedrock"
+
+
+def test_garbled_tool_name_sanitized_before_history():
+    """'rotate<|channel|>commentary' must be truncated to 'rotate' before AIMessage enters history."""
+    garbled = "rotate<|channel|>commentary"
+    tool_response = _ai_msg(
+        content="",
+        tool_calls=[{"name": garbled, "id": "call_r", "args": {"angle": 90.0}, "type": "tool_call"}],
+        usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+    )
+    final_response = _ai_msg("Rotated.", usage={"input_tokens": 8, "output_tokens": 2, "total_tokens": 10})
+
+    mock_rotate = MagicMock()
+    mock_rotate.invoke.return_value = _fake_tool_result({"processed_image_b64": "ZmFrZQ=="}, call_id="call_r")
+
+    with (
+        patch.object(agent_app, "llm_with_tools") as mock_llm,
+        patch.dict(agent_app.TOOLS, {"rotate": mock_rotate}),
+    ):
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        text, _ = agent_app.run_agent([HumanMessage(content="rotate the image")])
+
+    assert text == "Rotated."
+    mock_rotate.invoke.assert_called_once()
+
+    # Every toolUse.name in every AIMessage sent to the second invoke must be valid.
+    second_call_messages = mock_llm.invoke.call_args_list[1].args[0]
+    for msg in second_call_messages:
+        for tc in getattr(msg, "tool_calls", None) or []:
+            assert _BEDROCK_NAME_RE.match(tc["name"]), (
+                f"Invalid toolUse.name {tc['name']!r} would cause Bedrock ValidationException"
+            )
+
+
+def test_unrecoverable_tool_name_dropped_no_key_error():
+    """A name with no valid prefix (e.g. '<invalid>') must be dropped without raising KeyError."""
+    tool_response = _ai_msg(
+        content="fallback text",
+        tool_calls=[{"name": "<invalid>", "id": "call_x", "args": {}, "type": "tool_call"}],
+        usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+    )
+
+    with patch.object(agent_app, "llm_with_tools") as mock_llm:
+        mock_llm.invoke.return_value = tool_response
+        text, _ = agent_app.run_agent([HumanMessage(content="do something")])
+
+    # The bad call is dropped; the agent returns the text content without crashing.
+    assert mock_llm.invoke.call_count == 1
+    assert text == "fallback text"
+
+
+def test_unknown_tool_name_gets_error_tool_message():
+    """A valid-format but unknown tool name must receive an error ToolMessage, not a KeyError."""
+    tool_response = _ai_msg(
+        content="",
+        tool_calls=[{"name": "nonexistent_tool", "id": "call_y", "args": {}, "type": "tool_call"}],
+        usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+    )
+    final_response = _ai_msg("Sorry.", usage={"input_tokens": 8, "output_tokens": 2, "total_tokens": 10})
+
+    with patch.object(agent_app, "llm_with_tools") as mock_llm:
+        mock_llm.invoke.side_effect = [tool_response, final_response]
+        text, _ = agent_app.run_agent([HumanMessage(content="do something")])
+
+    assert text == "Sorry."
+    # Second call must include a ToolMessage with an error for the unknown tool
+    second_call_messages = mock_llm.invoke.call_args_list[1].args[0]
+    tool_msgs = [m for m in second_call_messages if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 1
+    payload = json.loads(tool_msgs[0].content)
+    assert "error" in payload
+    assert "nonexistent_tool" in payload["error"]
