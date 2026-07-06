@@ -5,8 +5,9 @@ import json
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Optional
+from typing import Any, Optional
 
 import boto3
 
@@ -23,17 +24,18 @@ logging.getLogger("langchain_core").setLevel(logging.DEBUG)
 
 import httpx
 from mcp import ClientSession
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.rate_limiters import InMemoryRateLimiter
-from langchain_core.tools import tool
-from pydantic import BaseModel
+from langchain_core.tools import StructuredTool, tool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from pydantic import BaseModel, create_model
 
 YOLO_SERVICE_URL = os.environ.get("YOLO_SERVICE_URL", "http://localhost:8080")
-IMG_PROC_MCP_URL = os.environ.get("IMG_PROC_MCP_URL", "http://127.0.0.1:5000")
+IMG_PROC_MCP_URL = os.environ.get("IMG_PROC_MCP_URL", "http://127.0.0.1:9000")
 MODEL = os.environ.get("MODEL")
 
 # Text-only models
@@ -55,9 +57,8 @@ if MODEL not in ALLOWED_MODELS:
     )
 
 SYSTEM_PROMPT = (
-    "You are an AI vision assistant. You help users understand and analyze images. "
-    "Use the available tools to extract information from images. "
-    "You can also rotate the image using the rotate_image tool before analyzing it."
+    "You are an AI vision assistant. Use the available tools for object detection "
+    "and image-processing operations (blur, rotate, flip, resize, crop, add_noise, etc.)."
 )
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -76,14 +77,9 @@ _processed_image_b64: ContextVar[Optional[str]] = ContextVar(
 
 
 def _call_mcp(tool_name: str, arguments: dict) -> str:
-    """Call a tool on the img-proc-mcp SSE server synchronously.
-
-    Uses asyncio.run() because the MCP SDK client is fully async while the
-    agent's tool execution is synchronous. Note: this will break if called
-    from inside an already-running event loop (e.g. async FastAPI endpoints).
-    """
+    """Call a tool on the img-proc-mcp HTTP server synchronously."""
     async def _inner() -> str:
-        async with sse_client(f"{IMG_PROC_MCP_URL}/sse") as (read, write):
+        async with streamable_http_client(f"{IMG_PROC_MCP_URL}/mcp") as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)
@@ -118,21 +114,42 @@ def detect_objects() -> str:
     return json.dumps(result)
 
 
-@tool
-def rotate_image(angle: float) -> str:
-    """Rotate the user's image by the given angle in degrees."""
-    image_b64 = _current_image_b64.get()
-    if not image_b64:
-        return json.dumps({"error": "No image was provided by the user."})
-    result_b64 = _call_mcp("rotate", {"image_b64": image_b64, "angle": angle})
-    return json.dumps({"processed_image_b64": result_b64})
+def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
+    """Build a sync LangChain tool from a discovered MCP tool.
+
+    Strips `image_b64` from the LLM-visible schema and injects it from the
+    request-scoped ContextVar at call time.
+    """
+    tool_name = mcp_tool.name
+    orig_fields = mcp_tool.args_schema.model_fields
+
+    schema_fields: dict[str, Any] = {}
+    for fname, fi in orig_fields.items():
+        if fname == "image_b64":
+            continue
+        annotation = fi.annotation if fi.annotation is not None else Any
+        default = fi.default if not fi.is_required() else ...
+        schema_fields[fname] = (annotation, default)
+
+    DynSchema = create_model(f"{tool_name}_Schema", **schema_fields)
+
+    def _run(**kwargs):
+        image_b64 = _current_image_b64.get()
+        if not image_b64:
+            return json.dumps({"error": "No image was provided by the user."})
+        result_b64 = _call_mcp(tool_name, {"image_b64": image_b64, **kwargs})
+        return json.dumps({"processed_image_b64": result_b64})
+
+    return StructuredTool.from_function(
+        name=tool_name,
+        description=mcp_tool.description or f"Apply {tool_name} to the user's image.",
+        func=_run,
+        args_schema=DynSchema,
+    )
 
 
-# Registry: map tool name -> tool function
-TOOLS = {
-    detect_objects.name: detect_objects,
-    rotate_image.name: rotate_image,
-}
+# Module-level defaults — overwritten by lifespan once MCP tools are discovered.
+TOOLS: dict = {detect_objects.name: detect_objects}
 
 rate_limiter = InMemoryRateLimiter(
     requests_per_second=0.5,
@@ -153,7 +170,35 @@ if not llm.profile.get("tool_calling"):
         "which is required by this agent."
     )
 
-llm_with_tools = llm.bind_tools(list(TOOLS.values()))
+llm_with_tools = llm.bind_tools([detect_objects])
+
+
+async def _init_tools() -> None:
+    """Discover MCP tools dynamically and rebind llm_with_tools."""
+    global TOOLS, llm_with_tools
+    client = MultiServerMCPClient(
+        {
+            "img-proc": {
+                "url": f"{IMG_PROC_MCP_URL}/mcp",
+                "transport": "streamable_http",
+            }
+        }
+    )
+    mcp_tools = await client.get_tools()
+    image_proc_tools = [_build_image_proc_wrapper(t) for t in mcp_tools]
+    all_tools = [detect_objects] + image_proc_tools
+    TOOLS = {t.name: t for t in all_tools}
+    llm_with_tools = llm.bind_tools(all_tools)
+    logging.info(
+        "MCP tools discovered: %s",
+        [t.name for t in image_proc_tools],
+    )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _init_tools()
+    yield
 
 
 def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
@@ -219,7 +264,7 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
                 )
 
 
-app = FastAPI(title="Vision Agent")
+app = FastAPI(title="Vision Agent", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
