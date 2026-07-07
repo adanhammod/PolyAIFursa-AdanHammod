@@ -632,3 +632,54 @@ def test_second_request_annotated_image_differs_from_first(mock_call_mcp):
     assert (
         resp1.json()["annotated_image_base64"] != resp2.json()["annotated_image_base64"]
     )
+
+
+def test_apply_to_object_blur_flow(mock_call_mcp, mock_s3):
+    """apply_to_object: detect → crop → blur → replace_region → processed_image_b64."""
+    import app as agent_app
+
+    fake_orig = base64.b64encode(b"ORIGINAL" * 10).decode()
+    crop_b64 = base64.b64encode(b"CROPPED").decode()
+    blurred_b64 = base64.b64encode(b"BLURRED").decode()
+    final_b64 = base64.b64encode(b"FINAL").decode()
+
+    detection_payload = {
+        "detection_objects": [
+            {"id": 0, "label": "dog", "score": 0.9, "box": [10.0, 20.0, 80.0, 100.0]}
+        ],
+        "annotated_image_s3_key": None,
+    }
+    mock_http_resp = MagicMock()
+    mock_http_resp.json.return_value = detection_payload
+    mock_http_resp.raise_for_status = MagicMock()
+
+    # _call_mcp is called three times: crop, blur, replace_region
+    mock_call_mcp.side_effect = [crop_b64, blurred_b64, final_b64]
+
+    with patch("httpx.Client") as mock_httpx_cls:
+        mock_httpx_cls.return_value.__enter__.return_value.post.return_value = mock_http_resp
+        agent_app._current_image_b64.set(fake_orig)
+        result_json = agent_app.apply_to_object.invoke({
+            "label": "dog", "position": "leftmost", "operation": "blur",
+        })
+
+    payload = json.loads(result_json)
+    assert payload.get("processed_image_b64") == final_b64, "final image not returned"
+
+    calls = mock_call_mcp.call_args_list
+    assert len(calls) == 3
+
+    crop_name, crop_args = calls[0][0][0], calls[0][0][1]
+    assert crop_name == "crop"
+    assert crop_args["left"] == 10 and crop_args["top"] == 20
+
+    blur_name, blur_args = calls[1][0][0], calls[1][0][1]
+    assert blur_name == "blur"
+    assert blur_args["image_b64"] == crop_b64
+
+    replace_name, replace_args = calls[2][0][0], calls[2][0][1]
+    assert replace_name == "replace_region"
+    assert replace_args["left"] == 10 and replace_args["top"] == 20
+    assert replace_args["right"] == 80 and replace_args["bottom"] == 100
+    assert replace_args["original_image_b64"] == fake_orig
+    assert replace_args["processed_region_b64"] == blurred_b64

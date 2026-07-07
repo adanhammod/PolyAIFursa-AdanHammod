@@ -19,7 +19,7 @@ _mock_llm.profile = {"tool_calling": True}
 _mock_llm.bind_tools.return_value = MagicMock()
 
 # Fake MCP tools that mirror the real img-proc-mcp server's tool names.
-_FAKE_MCP_TOOL_NAMES = ["rotate", "flip", "blur", "resize", "crop", "add_noise"]
+_FAKE_MCP_TOOL_NAMES = ["rotate", "flip", "blur", "resize", "crop", "add_noise", "replace_region"]
 
 
 def _make_fake_mcp_tool(name: str) -> MagicMock:

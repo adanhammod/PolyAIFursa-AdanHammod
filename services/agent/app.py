@@ -60,17 +60,21 @@ if MODEL not in ALLOWED_MODELS:
 
 SYSTEM_PROMPT = (
     "You are an AI vision assistant. Follow these tool-selection rules strictly:\n"
-    "- Use 'rotate' when the user asks to rotate the image.\n"
-    "- Use 'blur' when the user asks to blur the image.\n"
-    "- Use 'flip' when the user asks to flip or mirror the image.\n"
-    "- Use 'resize' when the user asks to resize the image.\n"
-    "- Use 'crop' when the user asks to crop the image.\n"
-    "- Use 'add_noise' when the user asks to add noise to the image.\n"
+    "- Use 'rotate' when the user asks to rotate the FULL image.\n"
+    "- Use 'blur' when the user asks to blur the FULL image.\n"
+    "- Use 'flip' when the user asks to flip or mirror the FULL image.\n"
+    "- Use 'resize' when the user asks to resize the FULL image.\n"
+    "- Use 'crop' when the user asks to crop the FULL image.\n"
+    "- Use 'add_noise' when the user asks to add noise to the FULL image.\n"
     "- Use 'detect_objects' ONLY when the user asks to analyze, detect, identify, "
     "count, or describe objects in the image.\n"
+    "- Use 'apply_to_object' when the user asks to apply an image operation to a SPECIFIC "
+    "detected object (e.g. 'blur the second dog from the right', 'rotate the leftmost car', "
+    "'add noise to the only person'). Do NOT refuse these requests. Do NOT use the direct "
+    "MCP tools (blur, rotate, etc.) for object-specific requests — always use apply_to_object.\n"
     "Do NOT call detect_objects for image-processing requests.\n\n"
     "Response format:\n"
-    "- For image-processing tools (rotate, blur, flip, resize, crop, add_noise): "
+    "- For image-processing tools (rotate, blur, flip, resize, crop, add_noise, apply_to_object): "
     "respond with ONE short sentence describing the completed action. "
     "Example: 'Done! I rotated the image 90° clockwise.'\n"
     "- For detect_objects: summarize detected objects naturally in 1–2 sentences. "
@@ -114,6 +118,20 @@ def _call_mcp(tool_name: str, arguments: dict) -> str:
     return asyncio.run(_inner())
 
 
+def _run_yolo_detection(image_b64: str) -> dict:
+    """Upload image to S3 and call YOLO /predict. Returns the raw response dict."""
+    image_bytes = base64.b64decode(image_b64)
+    original_key = f"originals/{uuid.uuid4()}.jpg"
+    s3_client.upload_fileobj(io.BytesIO(image_bytes), AWS_S3_BUCKET, original_key)
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(
+            f"{YOLO_SERVICE_URL}/predict",
+            json={"image_s3_key": original_key},
+        )
+        response.raise_for_status()
+    return response.json()
+
+
 @tool
 def detect_objects() -> str:
     """Detect and identify objects in the image provided by the user using YOLO object detection."""
@@ -121,23 +139,135 @@ def detect_objects() -> str:
     if not image_b64:
         return json.dumps({"error": "No image was provided by the user."})
 
-    image_bytes = base64.b64decode(image_b64)
-    original_key = f"originals/{uuid.uuid4()}.jpg"
-    s3_client.upload_fileobj(io.BytesIO(image_bytes), AWS_S3_BUCKET, original_key)
-
-    with httpx.Client(timeout=30.0) as client:
-        response = client.post(
-            f"{YOLO_SERVICE_URL}/predict",
-            json={"image_s3_key": original_key},
-        )
-        response.raise_for_status()
-
-    result = response.json()
+    result = _run_yolo_detection(image_b64)
     annotated_key = result.get("annotated_image_s3_key")
     if annotated_key:
         _annotated_image_s3_key.set(annotated_key)
 
     return json.dumps(result)
+
+
+# Maps position strings → (sort-descending-by-x-coord, 0-based list index)
+_POSITION_MAP: dict[str, tuple[bool, int]] = {
+    "leftmost":          (False, 0),
+    "first":             (False, 0),
+    "first_from_left":   (False, 0),
+    "rightmost":         (True,  0),
+    "last":              (True,  0),
+    "first_from_right":  (True,  0),
+    "second_from_left":  (False, 1),
+    "second":            (False, 1),
+    "second_from_right": (True,  1),
+    "third_from_left":   (False, 2),
+    "third":             (False, 2),
+    "third_from_right":  (True,  2),
+}
+
+
+def _op_params(operation: str, **kw) -> dict:
+    """Return the MCP arguments dict for the given operation (excluding image_b64)."""
+    return {
+        "blur":      {"radius":    kw["radius"]},
+        "rotate":    {"angle":     kw["angle"]},
+        "flip":      {"direction": kw["direction"]},
+        "add_noise": {"amount":    kw["amount"]},
+        "resize":    {"width":     kw["width"], "height": kw["height"]},
+    }[operation]
+
+
+def _select_object(objects: list[dict], label: str, position: str) -> dict:
+    """Filter detection objects by label and pick one by spatial position."""
+    matches = [o for o in objects if o["label"].lower() == label.lower()]
+    if not matches:
+        raise ValueError(f"No '{label}' detected in the image.")
+    if position == "largest":
+        return max(matches, key=lambda o: (o["box"][2] - o["box"][0]) * (o["box"][3] - o["box"][1]))
+    if position == "smallest":
+        return min(matches, key=lambda o: (o["box"][2] - o["box"][0]) * (o["box"][3] - o["box"][1]))
+    if position not in _POSITION_MAP:
+        raise ValueError(
+            f"Unknown position '{position}'. Supported: {sorted(_POSITION_MAP)} + largest, smallest."
+        )
+    desc, idx = _POSITION_MAP[position]
+    ordered = sorted(matches, key=lambda o: o["box"][0], reverse=desc)
+    if idx >= len(ordered):
+        raise ValueError(
+            f"Position '{position}' (index {idx}) out of range — "
+            f"only {len(ordered)} '{label}' detected."
+        )
+    return ordered[idx]
+
+
+_SUPPORTED_OBJECT_OPS = frozenset({"blur", "rotate", "flip", "add_noise", "resize"})
+
+
+@tool
+def apply_to_object(
+    label: str,
+    position: str,
+    operation: str,
+    radius: float = 2.0,
+    angle: float = 90.0,
+    direction: str = "horizontal",
+    amount: float = 0.02,
+    width: int = 256,
+    height: int = 256,
+) -> str:
+    """Apply an image processing operation to one specific detected object.
+
+    label: object class label, e.g. 'dog', 'person', 'car'
+    position: one of leftmost, rightmost, second_from_left, second_from_right,
+              third_from_left, third_from_right, largest, smallest
+    operation: one of blur, rotate, flip, add_noise, resize
+    radius: gaussian blur radius (blur only, default 2.0)
+    angle: rotation degrees (rotate only, default 90.0)
+    direction: 'horizontal' or 'vertical' (flip only, default 'horizontal')
+    amount: noise intensity 0–1 (add_noise only, default 0.02)
+    width, height: target pixel dimensions (resize only)
+    """
+    original_b64 = _current_image_b64.get()
+    if not original_b64:
+        return json.dumps({"error": "No image was provided by the user."})
+    if operation not in _SUPPORTED_OBJECT_OPS:
+        return json.dumps(
+            {"error": f"Unsupported operation '{operation}'. Use: {sorted(_SUPPORTED_OBJECT_OPS)}."}
+        )
+
+    try:
+        detection = _run_yolo_detection(original_b64)
+        objects = detection.get("detection_objects", [])
+        obj = _select_object(objects, label, position)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+
+    x1, y1, x2, y2 = (int(v) for v in obj["box"])
+    logging.info(
+        "apply_to_object: label=%r position=%r operation=%r box=[%d,%d,%d,%d]",
+        label, position, operation, x1, y1, x2, y2,
+    )
+
+    cropped_b64 = _call_mcp(
+        "crop",
+        {"image_b64": original_b64, "left": x1, "top": y1, "right": x2, "bottom": y2},
+    )
+    processed_b64 = _call_mcp(
+        operation,
+        {"image_b64": cropped_b64,
+         **_op_params(operation, radius=radius, angle=angle,
+                      direction=direction, amount=amount, width=width, height=height)},
+    )
+    final_b64 = _call_mcp(
+        "replace_region",
+        {
+            "original_image_b64":   original_b64,
+            "processed_region_b64": processed_b64,
+            "left":   x1,
+            "top":    y1,
+            "right":  x2,
+            "bottom": y2,
+        },
+    )
+    return json.dumps({"processed_image_b64": final_b64})
 
 
 # Map JSON Schema primitive types to Python types used in create_model().
@@ -292,8 +422,14 @@ def _build_image_proc_wrapper(mcp_tool) -> StructuredTool:
     )
 
 
+# MCP tools called internally only — not exposed to the LLM.
+_INTERNAL_MCP_TOOLS: frozenset[str] = frozenset({"replace_region"})
+
 # Module-level defaults — overwritten by lifespan once MCP tools are discovered.
-TOOLS: dict = {detect_objects.name: detect_objects}
+TOOLS: dict = {
+    detect_objects.name: detect_objects,
+    apply_to_object.name: apply_to_object,
+}
 
 rate_limiter = InMemoryRateLimiter(
     requests_per_second=0.5,
@@ -314,7 +450,7 @@ if not llm.profile.get("tool_calling"):
         "which is required by this agent."
     )
 
-llm_with_tools = llm.bind_tools([detect_objects])
+llm_with_tools = llm.bind_tools([detect_objects, apply_to_object])
 
 
 async def _init_tools() -> None:
@@ -330,8 +466,12 @@ async def _init_tools() -> None:
     )
     mcp_tools = await client.get_tools()
     logging.info("MCP raw tool names from get_tools(): %s", [t.name for t in mcp_tools])
-    image_proc_tools = [_build_image_proc_wrapper(t) for t in mcp_tools]
-    all_tools = [detect_objects] + image_proc_tools
+    image_proc_tools = [
+        _build_image_proc_wrapper(t)
+        for t in mcp_tools
+        if t.name not in _INTERNAL_MCP_TOOLS
+    ]
+    all_tools = [detect_objects, apply_to_object] + image_proc_tools
     TOOLS = {t.name: t for t in all_tools}
     logging.info("Tools bound to LLM: %s", [t.name for t in all_tools])
     llm_with_tools = llm.bind_tools(all_tools)
