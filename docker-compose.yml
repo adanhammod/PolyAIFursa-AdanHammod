@@ -5,8 +5,7 @@ services:
     image: ${DOCKERHUB_USERNAME}/yolo-service:${YOLO_IMAGE_TAG:-local}
     ports:
       - "8080:8080"
-    env_file:
-      - ./services/yolo/.env
+
 
   img-proc-mcp:
     build:
