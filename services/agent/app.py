@@ -10,6 +10,7 @@ import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any, Optional
+from prometheus_fastapi_instrumentator import Instrumentator
 
 import boto3
 
@@ -149,29 +150,29 @@ def detect_objects() -> str:
 
 # Maps position strings → (sort-descending-by-x-coord, 0-based list index)
 _POSITION_MAP: dict[str, tuple[bool, int]] = {
-    "leftmost":          (False, 0),
-    "first":             (False, 0),
-    "first_from_left":   (False, 0),
-    "rightmost":         (True,  0),
-    "last":              (True,  0),
-    "first_from_right":  (True,  0),
-    "second_from_left":  (False, 1),
-    "second":            (False, 1),
-    "second_from_right": (True,  1),
-    "third_from_left":   (False, 2),
-    "third":             (False, 2),
-    "third_from_right":  (True,  2),
+    "leftmost": (False, 0),
+    "first": (False, 0),
+    "first_from_left": (False, 0),
+    "rightmost": (True, 0),
+    "last": (True, 0),
+    "first_from_right": (True, 0),
+    "second_from_left": (False, 1),
+    "second": (False, 1),
+    "second_from_right": (True, 1),
+    "third_from_left": (False, 2),
+    "third": (False, 2),
+    "third_from_right": (True, 2),
 }
 
 
 def _op_params(operation: str, **kw) -> dict:
     """Return the MCP arguments dict for the given operation (excluding image_b64)."""
     return {
-        "blur":      {"radius":    kw["radius"]},
-        "rotate":    {"angle":     kw["angle"]},
-        "flip":      {"direction": kw["direction"]},
-        "add_noise": {"amount":    kw["amount"]},
-        "resize":    {"width":     kw["width"], "height": kw["height"]},
+        "blur": {"radius": kw["radius"]},
+        "rotate": {"angle": kw["angle"]},
+        "flip": {"direction": kw["direction"]},
+        "add_noise": {"amount": kw["amount"]},
+        "resize": {"width": kw["width"], "height": kw["height"]},
     }[operation]
 
 
@@ -181,9 +182,15 @@ def _select_object(objects: list[dict], label: str, position: str) -> dict:
     if not matches:
         raise ValueError(f"No '{label}' detected in the image.")
     if position == "largest":
-        return max(matches, key=lambda o: (o["box"][2] - o["box"][0]) * (o["box"][3] - o["box"][1]))
+        return max(
+            matches,
+            key=lambda o: (o["box"][2] - o["box"][0]) * (o["box"][3] - o["box"][1]),
+        )
     if position == "smallest":
-        return min(matches, key=lambda o: (o["box"][2] - o["box"][0]) * (o["box"][3] - o["box"][1]))
+        return min(
+            matches,
+            key=lambda o: (o["box"][2] - o["box"][0]) * (o["box"][3] - o["box"][1]),
+        )
     if position not in _POSITION_MAP:
         raise ValueError(
             f"Unknown position '{position}'. Supported: {sorted(_POSITION_MAP)} + largest, smallest."
@@ -230,7 +237,9 @@ def apply_to_object(
         return json.dumps({"error": "No image was provided by the user."})
     if operation not in _SUPPORTED_OBJECT_OPS:
         return json.dumps(
-            {"error": f"Unsupported operation '{operation}'. Use: {sorted(_SUPPORTED_OBJECT_OPS)}."}
+            {
+                "error": f"Unsupported operation '{operation}'. Use: {sorted(_SUPPORTED_OBJECT_OPS)}."
+            }
         )
 
     try:
@@ -243,7 +252,13 @@ def apply_to_object(
     x1, y1, x2, y2 = (int(v) for v in obj["box"])
     logging.info(
         "apply_to_object: label=%r position=%r operation=%r box=[%d,%d,%d,%d]",
-        label, position, operation, x1, y1, x2, y2,
+        label,
+        position,
+        operation,
+        x1,
+        y1,
+        x2,
+        y2,
     )
 
     cropped_b64 = _call_mcp(
@@ -252,18 +267,27 @@ def apply_to_object(
     )
     processed_b64 = _call_mcp(
         operation,
-        {"image_b64": cropped_b64,
-         **_op_params(operation, radius=radius, angle=angle,
-                      direction=direction, amount=amount, width=width, height=height)},
+        {
+            "image_b64": cropped_b64,
+            **_op_params(
+                operation,
+                radius=radius,
+                angle=angle,
+                direction=direction,
+                amount=amount,
+                width=width,
+                height=height,
+            ),
+        },
     )
     final_b64 = _call_mcp(
         "replace_region",
         {
-            "original_image_b64":   original_b64,
+            "original_image_b64": original_b64,
             "processed_region_b64": processed_b64,
-            "left":   x1,
-            "top":    y1,
-            "right":  x2,
+            "left": x1,
+            "top": y1,
+            "right": x2,
             "bottom": y2,
         },
     )
@@ -643,6 +667,8 @@ def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
 
 app = FastAPI(title="Vision Agent", lifespan=lifespan)
 
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -770,277 +796,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000, loop="asyncio")
-import base64
-import io
-import json
-import logging
-import os
-import uuid
-from contextvars import ContextVar
-from typing import Optional
-from prometheus_fastapi_instrumentator import Instrumentator
-
-import boto3
-
-from dotenv import load_dotenv
-
-load_dotenv()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
-logging.getLogger("langchain").setLevel(logging.DEBUG)
-logging.getLogger("langchain_core").setLevel(logging.DEBUG)
-
-import httpx
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.rate_limiters import InMemoryRateLimiter
-from langchain_core.tools import tool
-from pydantic import BaseModel
-
-YOLO_SERVICE_URL = os.environ.get("YOLO_SERVICE_URL", "http://localhost:8080")
-MODEL = os.environ.get("MODEL")
-
-# Text-only models
-ALLOWED_MODELS = {
-    "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
-    "bedrock/amazon.nova-micro-v1:0",
-    "bedrock/amazon.nova-lite-v1:0",
-    "bedrock/openai.gpt-oss-20b-1:0",
-    "bedrock/meta.llama3-1-8b-instruct-v1:0",
-    "bedrock/mistral.mistral-7b-instruct-v0:2",
-    "bedrock_converse:openai.gpt-oss-20b-1:0",
-}
-
-if MODEL not in ALLOWED_MODELS:
-    allowed_list = "\n  ".join(sorted(ALLOWED_MODELS))
-    raise SystemExit(
-        f"\n[ERROR] MODEL='{MODEL}' is not allowed.\n"
-        f"Set MODEL in your .env to one of the supported text-only models:\n  {allowed_list}\n"
-    )
-
-SYSTEM_PROMPT = (
-    "You are an AI vision assistant. You help users understand and analyze images. "
-    "Use the available tools to extract information from images. "
-)
-
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET")
-s3_client = boto3.client("s3", region_name=AWS_REGION)
-
-_current_image_b64: ContextVar[Optional[str]] = ContextVar(
-    "current_image_b64", default=None
-)
-_annotated_image_s3_key: ContextVar[Optional[str]] = ContextVar(
-    "annotated_image_s3_key", default=None
-)
-
-
-@tool
-def detect_objects() -> str:
-    """Detect and identify objects in the image provided by the user using YOLO object detection."""
-    image_b64 = _current_image_b64.get()
-    if not image_b64:
-        return json.dumps({"error": "No image was provided by the user."})
-
-    image_bytes = base64.b64decode(image_b64)
-    original_key = f"originals/{uuid.uuid4()}.jpg"
-    s3_client.upload_fileobj(io.BytesIO(image_bytes), AWS_S3_BUCKET, original_key)
-
-    with httpx.Client(timeout=30.0) as client:
-        response = client.post(
-            f"{YOLO_SERVICE_URL}/predict",
-            json={"image_s3_key": original_key},
-        )
-        response.raise_for_status()
-
-    result = response.json()
-    annotated_key = result.get("annotated_image_s3_key")
-    if annotated_key:
-        _annotated_image_s3_key.set(annotated_key)
-
-    return json.dumps(result)
-
-
-# Registry: map tool name -> tool function
-TOOLS = {detect_objects.name: detect_objects}
-
-rate_limiter = InMemoryRateLimiter(
-    requests_per_second=0.5,
-    check_every_n_seconds=0.1,
-    max_bucket_size=10,
-)
-
-llm = init_chat_model(
-    MODEL,
-    temperature=0,
-    rate_limiter=rate_limiter,
-    region_name=AWS_REGION,
-)
-
-if not llm.profile.get("tool_calling"):
-    raise SystemExit(
-        f"[ERROR] Model '{MODEL}' does not support tool calling, "
-        "which is required by this agent."
-    )
-
-llm_with_tools = llm.bind_tools(list(TOOLS.values()))
-
-
-def run_agent(history: list, max_iterations: int = 10) -> tuple[str, dict]:
-    """
-    Simple ReAct loop:
-      1. Send messages to the LLM.
-      2. If the LLM requests tool calls, execute them and append results.
-      3. Repeat until the LLM returns a plain text response.
-    Returns (response_text, token_counts) where token_counts has "input", "output", "total" keys.
-    """
-    messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
-    tokens = {"input": 0, "output": 0, "total": 0}
-    iterations = 0
-
-    while True:
-        iterations += 1
-
-        if iterations > max_iterations:
-            return (
-                "Error: Agent exceeded maximum iterations without producing a final answer.",
-                tokens,
-            )
-
-        response: AIMessage = llm_with_tools.invoke(messages)
-        messages.append(response)
-
-        meta = response.usage_metadata or {}
-        tokens["input"] += meta.get("input_tokens", 0)
-        tokens["output"] += meta.get("output_tokens", 0)
-        tokens["total"] += meta.get("total_tokens", 0)
-
-        # No tool calls, the model produced its final answer
-        if not response.tool_calls:
-            content = response.content
-            if isinstance(content, list):
-                content = "\n".join(
-                    item.get("text", str(item)) if isinstance(item, dict) else str(item)
-                    for item in content
-                )
-            return content, tokens
-
-        # Execute every tool the model requested
-        for tool_call in response.tool_calls:
-            tool_fn = TOOLS[tool_call["name"]]
-            tool_result = tool_fn.invoke(tool_call)  # returns a ToolMessage
-            messages.append(tool_result)
-
-            # LangChain invokes tools in a copied context, so ContextVar.set() inside
-            # the tool is invisible to chat(). Extract the key from the ToolMessage here,
-            # where we share the same context as the caller.
-            try:
-                payload = json.loads(tool_result.content)
-                annotated_key = payload.get("annotated_image_s3_key")
-                if annotated_key:
-                    _annotated_image_s3_key.set(annotated_key)
-            except Exception:
-                logging.exception(
-                    "Failed to parse tool result for annotated_image_s3_key"
-                )
-
-
-app = FastAPI(title="Vision Agent")
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://prod.adan.fursa.click:3000",
-        "http://adan-dev.fursa.click:3000",
-        "http://localhost:3000",
-    ],
-    allow_methods=["POST", "GET"],
-    allow_headers=["Content-Type"],
-)
-
-
-class ChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
-    content: str
-    image_base64: Optional[str] = None  # only on user messages that carry an image
-
-
-class ChatRequest(BaseModel):
-    messages: list[ChatMessage]  # full conversation thread, oldest first
-
-
-class ChatResponse(BaseModel):
-    response: str
-    annotated_image_base64: Optional[str] = None
-    tokens_used: dict  # {"input": int, "output": int, "total": int}
-
-
-@app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
-    lc_messages = []
-    latest_image = None
-
-    for msg in request.messages:
-        if msg.role == "user":
-            if msg.image_base64:
-                latest_image = msg.image_base64  # saved for detect_objects tool
-                content = (
-                    msg.content
-                    + "\n[An image was uploaded. Use existing tools to analyze it according to user instructions.]"
-                )
-            else:
-                content = msg.content
-            lc_messages.append(HumanMessage(content=content))
-        else:
-            lc_messages.append(AIMessage(content=msg.content))
-
-    token_img = _current_image_b64.set(latest_image)
-    token_key = _annotated_image_s3_key.set(None)
-    try:
-        response_text, tokens_used = run_agent(lc_messages)
-        annotated_image_b64 = None
-
-        annotated_key = _annotated_image_s3_key.get()
-        logging.info("Annotated image S3 key: %s", annotated_key)
-
-        response_text = "\n".join(
-            line
-            for line in response_text.splitlines()
-            if "Annotated image:" not in line
-            and "http://localhost:8080/prediction/" not in line
-            and (not annotated_key or annotated_key not in line)
-        ).strip()
-
-        if annotated_key:
-            try:
-                buf = io.BytesIO()
-                s3_client.download_fileobj(AWS_S3_BUCKET, annotated_key, buf)
-                annotated_image_b64 = base64.b64encode(buf.getvalue()).decode()
-            except Exception:
-                logging.exception("Failed to fetch annotated image from S3")
-
-        return ChatResponse(
-            response=response_text,
-            annotated_image_base64=annotated_image_b64,
-            tokens_used=tokens_used,
-        )
-    finally:
-        _current_image_b64.reset(token_img)
-        _annotated_image_s3_key.reset(token_key)
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
