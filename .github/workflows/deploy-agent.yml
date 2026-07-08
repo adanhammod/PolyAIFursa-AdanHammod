@@ -45,7 +45,12 @@ jobs:
             grep -q "^AGENT_IMAGE_TAG=" .env && sed -i "s|^AGENT_IMAGE_TAG=.*|AGENT_IMAGE_TAG=${{ github.sha }}|" .env || echo "AGENT_IMAGE_TAG=${{ github.sha }}" >> .env
 
             docker compose pull agent
+            docker compose up -d --no-build img-proc-mcp
             docker compose up -d --no-build agent
+
+            sleep 5
+            docker compose ps agent
+            docker compose logs agent --tail=80
 
       - name: Deploy Agent to Prod
         if: github.ref == 'refs/heads/main'
@@ -64,4 +69,9 @@ jobs:
             grep -q "^AGENT_IMAGE_TAG=" .env && sed -i "s|^AGENT_IMAGE_TAG=.*|AGENT_IMAGE_TAG=${{ github.sha }}|" .env || echo "AGENT_IMAGE_TAG=${{ github.sha }}" >> .env
 
             docker compose pull agent
+            docker compose up -d --no-build img-proc-mcp
             docker compose up -d --no-build agent
+
+            sleep 5
+            docker compose ps agent
+            docker compose logs agent --tail=80
