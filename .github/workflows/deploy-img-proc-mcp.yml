@@ -21,22 +21,41 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push img-proc-mcp image
+      - name: Build and push MCP image
         uses: docker/build-push-action@v6
         with:
           context: ./services/img-proc-mcp
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/img-proc-mcp:${{ github.sha }}
 
-      - name: Deploy img-proc-mcp
+      - name: Deploy MCP to Dev
+        if: github.ref == 'refs/heads/dev'
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: adan-dev.fursa.click
+          username: ubuntu
+          key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
           script: |
             cd ~/PolyAIFursa-AdanHammod
-            git pull origin ${{ github.ref_name }}
+            git pull origin dev
+
+            touch .env
+            grep -q "^DOCKERHUB_USERNAME=" .env && sed -i "s|^DOCKERHUB_USERNAME=.*|DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}|" .env || echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}" >> .env
+            grep -q "^IMG_PROC_MCP_IMAGE_TAG=" .env && sed -i "s|^IMG_PROC_MCP_IMAGE_TAG=.*|IMG_PROC_MCP_IMAGE_TAG=${{ github.sha }}|" .env || echo "IMG_PROC_MCP_IMAGE_TAG=${{ github.sha }}" >> .env
+
+            docker compose pull img-proc-mcp
+            docker compose up -d --no-build img-proc-mcp
+
+      - name: Deploy MCP to Prod
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: prod.adan.fursa.click
+          username: ubuntu
+          key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
+          script: |
+            cd ~/PolyAIFursa-AdanHammod
+            git pull origin main
 
             touch .env
             grep -q "^DOCKERHUB_USERNAME=" .env && sed -i "s|^DOCKERHUB_USERNAME=.*|DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}|" .env || echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}" >> .env
