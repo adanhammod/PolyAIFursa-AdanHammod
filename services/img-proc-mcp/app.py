@@ -125,5 +125,8 @@ def replace_region(
 
 
 if __name__ == "__main__":
-    os.environ["FASTMCP_PORT"] = str(MCP_PORT)
-    mcp.run(transport="http")
+    mcp.run(
+        transport="http",
+        host="0.0.0.0",
+        port=MCP_PORT,
+    )
