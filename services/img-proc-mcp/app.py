@@ -125,10 +125,4 @@ def replace_region(
 
 
 if __name__ == "__main__":  # no change
-    mcp.run(
-        transport="http",
-        host="0.0.0.0",
-        port=MCP_PORT,
-    )
-
-# note to check ....
+    mcp.run(transport="streamable-http")
