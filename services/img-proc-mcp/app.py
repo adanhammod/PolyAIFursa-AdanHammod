@@ -96,5 +96,29 @@ def add_noise(image_b64: str, amount: float = 0.02) -> str:
     return _encode(Image.fromarray(arr))
 
 
+@mcp.tool()
+def replace_region(
+    original_image_b64: str,
+    processed_region_b64: str,
+    left: int,
+    top: int,
+    right: int,
+    bottom: int,
+) -> str:
+    original = _decode(original_image_b64)
+    region = _decode(processed_region_b64)
+    w, h = original.size
+    left = max(0, left)
+    top = max(0, top)
+    right = min(w, right)
+    bottom = min(h, bottom)
+    if left >= right or top >= bottom:
+        return _encode(original)
+    region = region.resize((right - left, bottom - top))
+    result = original.copy()
+    result.paste(region, (left, top))
+    return _encode(result)
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
