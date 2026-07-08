@@ -35,6 +35,7 @@ jobs:
           host: adan-dev.fursa.click
           username: ubuntu
           key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
+          command_timeout: 10m
           script: |
             cd ~/PolyAIFursa-AdanHammod
             git pull origin dev
