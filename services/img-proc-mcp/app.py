@@ -83,5 +83,8 @@ def add_noise(image_b64: str, amount: float = 0.02) -> str:
 
 
 if __name__ == "__main__":
-    os.environ["FASTMCP_PORT"] = str(MCP_PORT)
-    mcp.run(transport="http")
+    mcp.run(
+        transport="http",
+        host="0.0.0.0",
+        port=MCP_PORT,
+    )
