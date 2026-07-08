@@ -4,12 +4,25 @@ import os
 
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
-from fastmcp import FastMCP
-
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 MCP_PORT = int(os.environ.get("FASTMCP_PORT", 9000))
 
-mcp = FastMCP("img-proc")
+mcp = FastMCP(
+    "img-proc",
+    host="0.0.0.0",
+    port=MCP_PORT,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "img-proc-mcp:9000",
+            "localhost:9000",
+            "127.0.0.1:9000",
+        ],
+        allowed_origins=["*"],
+    ),
+)
 
 
 def _decode(image_b64: str) -> Image.Image:
@@ -83,8 +96,4 @@ def add_noise(image_b64: str, amount: float = 0.02) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(
-        transport="http",
-        host="0.0.0.0",
-        port=MCP_PORT,
-    )
+    mcp.run(transport="streamable-http")
