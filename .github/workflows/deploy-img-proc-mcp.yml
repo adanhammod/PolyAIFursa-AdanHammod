@@ -1,0 +1,46 @@
+name: Deploy Image Processing MCP
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "services/img-proc-mcp/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-img-proc-mcp.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push img-proc-mcp image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/img-proc-mcp
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/img-proc-mcp:${{ github.sha }}
+
+      - name: Deploy img-proc-mcp
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/PolyAIFursa-AdanHammod
+            git pull origin ${{ github.ref_name }}
+
+            touch .env
+            grep -q "^DOCKERHUB_USERNAME=" .env && sed -i "s|^DOCKERHUB_USERNAME=.*|DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}|" .env || echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}" >> .env
+            grep -q "^IMG_PROC_MCP_IMAGE_TAG=" .env && sed -i "s|^IMG_PROC_MCP_IMAGE_TAG=.*|IMG_PROC_MCP_IMAGE_TAG=${{ github.sha }}|" .env || echo "IMG_PROC_MCP_IMAGE_TAG=${{ github.sha }}" >> .env
+
+            docker compose pull img-proc-mcp
+            docker compose up -d --no-build img-proc-mcp
