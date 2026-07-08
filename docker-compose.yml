@@ -6,7 +6,6 @@ services:
     ports:
       - "8080:8080"
 
-
   img-proc-mcp:
     build:
       context: ./services/img-proc-mcp
@@ -26,7 +25,9 @@ services:
       - ./services/agent/.env
     environment:
       YOLO_SERVICE_URL: http://yolo:8080
-      IMG_PROC_MCP_URL: http://img-proc-mcp:9000
+      IMG_PROC_MCP_URL: http://host.docker.internal:9000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - yolo
       - img-proc-mcp
