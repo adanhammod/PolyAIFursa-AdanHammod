@@ -19,6 +19,7 @@ mcp = FastMCP(
             "img-proc-mcp:9000",
             "localhost:9000",
             "127.0.0.1:9000",
+            "host.docker.internal:9000",
         ],
         allowed_origins=["*"],
     ),
