@@ -76,10 +76,20 @@ def resize(image_b64: str, width: int, height: int) -> str:
 def crop(image_b64: str, left: int, top: int, right: int, bottom: int) -> str:
     img = _decode(image_b64)
     w, h = img.size
-    if left < 0 or top < 0 or right > w or bottom > h or left >= right or top >= bottom:
+
+    left, right = sorted((left, right))
+    top, bottom = sorted((top, bottom))
+
+    left = max(0, left)
+    top = max(0, top)
+    right = min(w, right)
+    bottom = min(h, bottom)
+
+    if left >= right or top >= bottom:
         raise ValueError(
             f"Invalid crop box ({left}, {top}, {right}, {bottom}) for image of size {w}x{h}."
         )
+
     return _encode(img.crop((left, top, right, bottom)))
 
 
