@@ -124,7 +124,7 @@ def replace_region(
     return _encode(result)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # no change
     mcp.run(
         transport="http",
         host="0.0.0.0",
