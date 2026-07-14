@@ -26,7 +26,9 @@ jobs:
         with:
           context: ./services/frontend
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
           build-args: |
             NEXT_PUBLIC_AGENT_URL=${{ github.ref == 'refs/heads/main' && 'http://prod.adan.fursa.click:8000' || 'http://adan-dev.fursa.click:8000' }}
 
