@@ -30,8 +30,7 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.sha }}
             ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
           build-args: |
-            NEXT_PUBLIC_AGENT_URL=${{ github.ref == 'refs/heads/main' && 'http://prod.adan.fursa.click:8000' || 'http://adan-dev.fursa.click:8000' }}
-
+            NEXT_PUBLIC_AGENT_URL=${{ github.ref == 'refs/heads/main' && 'http://prod.adan.fursa.click:8000' || 'http://13.223.184.237:30800' }}
       - name: Deploy Frontend to Dev
         if: github.ref == 'refs/heads/dev'
         uses: appleboy/ssh-action@v1.0.3
