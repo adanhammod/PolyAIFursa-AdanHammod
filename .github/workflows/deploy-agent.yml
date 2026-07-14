@@ -26,7 +26,9 @@ jobs:
         with:
           context: ./services/agent
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/agent-service:${{ github.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/agent-service:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/agent-service:${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
 
       - name: Deploy Agent to Dev
         if: github.ref == 'refs/heads/dev'

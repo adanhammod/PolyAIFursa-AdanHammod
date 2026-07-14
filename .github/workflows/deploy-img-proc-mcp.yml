@@ -26,7 +26,9 @@ jobs:
         with:
           context: ./services/img-proc-mcp
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/img-proc-mcp:${{ github.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/img-proc-mcp:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/img-proc-mcp:${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
 
       - name: Deploy MCP to Dev
         if: github.ref == 'refs/heads/dev'
