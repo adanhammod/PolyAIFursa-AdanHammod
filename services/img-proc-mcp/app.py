@@ -17,6 +17,7 @@ mcp = FastMCP(
         enable_dns_rebinding_protection=True,
         allowed_hosts=[
             "img-proc-mcp:9000",
+            "img-proc-mcp-svc:9000",
             "localhost:9000",
             "127.0.0.1:9000",
             "host.docker.internal:9000",
