@@ -683,7 +683,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://13.223.184.237:30300",
     ],
-    allow_methods=["POST", "GET"],
+    allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
 
