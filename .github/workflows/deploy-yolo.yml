@@ -1,0 +1,67 @@
+name: Deploy YOLO
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "services/yolo/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-yolo.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push YOLO image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/yolo
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/yolo-service:${{ github.sha }}
+
+      - name: Deploy YOLO to Dev
+        if: github.ref == 'refs/heads/dev'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: adan-dev.fursa.click
+          username: ubuntu
+          key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            cd ~/PolyAIFursa-AdanHammod
+            git pull origin dev
+
+            touch .env
+            grep -q "^DOCKERHUB_USERNAME=" .env && sed -i "s|^DOCKERHUB_USERNAME=.*|DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}|" .env || echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}" >> .env
+            grep -q "^YOLO_IMAGE_TAG=" .env && sed -i "s|^YOLO_IMAGE_TAG=.*|YOLO_IMAGE_TAG=${{ github.sha }}|" .env || echo "YOLO_IMAGE_TAG=${{ github.sha }}" >> .env
+
+            docker compose pull yolo
+            docker compose up -d --no-build yolo
+
+      - name: Deploy YOLO to Prod
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: prod.adan.fursa.click
+          username: ubuntu
+          key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            cd ~/PolyAIFursa-AdanHammod
+            git pull origin main
+
+            touch .env
+            grep -q "^DOCKERHUB_USERNAME=" .env && sed -i "s|^DOCKERHUB_USERNAME=.*|DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}|" .env || echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}" >> .env
+            grep -q "^YOLO_IMAGE_TAG=" .env && sed -i "s|^YOLO_IMAGE_TAG=.*|YOLO_IMAGE_TAG=${{ github.sha }}|" .env || echo "YOLO_IMAGE_TAG=${{ github.sha }}" >> .env
+
+            docker compose pull yolo
+            docker compose up -d --no-build yolo

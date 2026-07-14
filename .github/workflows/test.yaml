@@ -5,8 +5,12 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
-  test:
+  test-yolo:
     runs-on: ubuntu-latest
 
     steps:
@@ -34,3 +38,52 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: services/yolo/coverage.xml
           fail_ci_if_error: true
+  test-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r services/agent/requirements.txt
+
+      - name: Run agent tests
+        working-directory: services/agent
+        env:
+          MODEL: bedrock/anthropic.claude-3-haiku-20240307-v1:0
+          AWS_REGION: us-east-1
+          AWS_S3_BUCKET: test-bucket
+        run: |
+          pytest tests/ -v
+
+  docker-scout:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build YOLO image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/yolo
+          push: false
+          tags: yolo-service:ci
+
+      - name: Scan YOLO image with Docker Scout
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: yolo-service:ci
+          only-severities: critical,high
