@@ -681,6 +681,7 @@ app.add_middleware(
         "http://prod.adan.fursa.click:3000",
         "http://adan-dev.fursa.click:3000",
         "http://localhost:3000",
+        "http://13.223.184.237:30300",
     ],
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
