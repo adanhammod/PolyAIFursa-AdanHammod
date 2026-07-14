@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-exporter
+  namespace: dev
+  labels:
+    app: node-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      hostNetwork: true
+      hostPID: true
+
+      containers:
+        - name: node-exporter
+          image: quay.io/prometheus/node-exporter:latest
+
+          args:
+            - "--path.rootfs=/host"
+
+          ports:
+            - containerPort: 9100
+
+          volumeMounts:
+            - name: root
+              mountPath: /host
+              readOnly: true
+              mountPropagation: HostToContainer
+
+      volumes:
+        - name: root
+          hostPath:
+            path: /
