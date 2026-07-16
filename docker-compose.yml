@@ -6,7 +6,13 @@ services:
     ports:
       - "8080:8080"
     env_file:
-      - ./services/yolo/.env  
+      - ./services/yolo/.env
+    labels:
+      container_name: yolo-service
+    logging:
+      driver: json-file
+      options:
+        labels: container_name
 
   img-proc-mcp:
     build:
@@ -16,6 +22,12 @@ services:
       - "9000:9000"
     environment:
       FASTMCP_PORT: 9000
+    labels:
+      container_name: img-proc-mcp
+    logging:
+      driver: json-file
+      options:
+        labels: container_name
 
   agent:
     build:
@@ -31,6 +43,12 @@ services:
     depends_on:
       - yolo
       - img-proc-mcp
+    labels:
+      container_name: agent-service
+    logging:
+      driver: json-file
+      options:
+        labels: container_name
 
   frontend:
     build:
@@ -42,6 +60,12 @@ services:
       NEXT_PUBLIC_AGENT_URL: http://adan-dev.fursa.click:8000
     depends_on:
       - agent
+    labels:
+      container_name: frontend-service
+    logging:
+      driver: json-file
+      options:
+        labels: container_name
 
   prometheus:
     image: prom/prometheus:v2.55.1
@@ -53,6 +77,12 @@ services:
       - agent
       - yolo
       - node-exporter
+    labels:
+      container_name: prometheus
+    logging:
+      driver: json-file
+      options:
+        labels: container_name
 
   grafana:
     image: grafana/grafana:11.3.0
@@ -62,11 +92,23 @@ services:
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
+    labels:
+      container_name: grafana
+    logging:
+      driver: json-file
+      options:
+        labels: container_name
 
   node-exporter:
     image: prom/node-exporter:v1.8.2
     ports:
       - "9100:9100"
+    labels:
+      container_name: node-exporter
+    logging:
+      driver: json-file
+      options:
+        labels: container_name
 
   fluent-bit:
     image: fluent/fluent-bit:4.2.7
@@ -75,7 +117,13 @@ services:
     volumes:
       - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/log:/var/log    
+      - /var/log:/var/log
+    labels:
+      container_name: fluent-bit
+    logging:
+      driver: json-file
+      options:
+        labels: container_name
 
 volumes:
   grafana-data:
