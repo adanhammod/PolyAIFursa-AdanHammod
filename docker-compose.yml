@@ -68,14 +68,5 @@ services:
     ports:
       - "9100:9100"
 
-  fluent-bit:
-    image: fluent/fluent-bit:4.2.7
-    container_name: fluent-bit
-    restart: unless-stopped
-    volumes:
-      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/log:/var/log    
-
 volumes:
   grafana-data:
