@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: yolo
-  namespace: dev
+  namespace: prod
   labels:
     app: yolo
 spec:
