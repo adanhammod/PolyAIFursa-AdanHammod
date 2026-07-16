@@ -6,15 +6,32 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any, Optional
-from prometheus_fastapi_instrumentator import Instrumentator
 
 import boto3
-
+import httpx
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langchain_core.rate_limiters import InMemoryRateLimiter
+from langchain_core.tools import StructuredTool, tool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+from prometheus_client import Counter, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
+from pydantic import BaseModel, create_model
 
 load_dotenv()
 
@@ -24,18 +41,6 @@ logging.basicConfig(
 )
 logging.getLogger("langchain").setLevel(logging.DEBUG)
 logging.getLogger("langchain_core").setLevel(logging.DEBUG)
-
-import httpx
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.rate_limiters import InMemoryRateLimiter
-from langchain_core.tools import StructuredTool, tool
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from pydantic import BaseModel, create_model
 
 YOLO_SERVICE_URL = os.environ.get("YOLO_SERVICE_URL", "http://localhost:8080")
 IMG_PROC_MCP_URL = os.environ.get("IMG_PROC_MCP_URL", "http://127.0.0.1:9000")
@@ -675,6 +680,27 @@ app = FastAPI(title="Vision Agent", lifespan=lifespan)
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
+CHAT_REQUESTS_TOTAL = Counter(
+    "agent_chat_requests_total",
+    "Total number of chat requests",
+    ["status"],
+)
+
+CHAT_REQUEST_LATENCY_SECONDS = Histogram(
+    "agent_chat_request_latency_seconds",
+    "Chat request latency in seconds",
+)
+
+CHAT_INPUT_TOKENS_TOTAL = Counter(
+    "agent_chat_input_tokens_total",
+    "Total input tokens",
+)
+
+CHAT_OUTPUT_TOKENS_TOTAL = Counter(
+    "agent_chat_output_tokens_total",
+    "Total output tokens",
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -706,6 +732,8 @@ class ChatResponse(BaseModel):
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
+    start_time = time.perf_counter()
+    status = "error"
     lc_messages = []
 
     # Extract image only from the MOST RECENT user message.
@@ -748,6 +776,8 @@ def chat(request: ChatRequest):
     token_proc = _processed_image_b64.set(None)
     try:
         response_text, tokens_used = run_agent(lc_messages)
+        CHAT_INPUT_TOKENS_TOTAL.inc(tokens_used.get("input", 0))
+        CHAT_OUTPUT_TOKENS_TOTAL.inc(tokens_used.get("output", 0))
         annotated_image_b64 = None
 
         annotated_key = _annotated_image_s3_key.get()
@@ -783,12 +813,19 @@ def chat(request: ChatRequest):
         logging.info(
             "annotated_image_base64 present: %s", annotated_image_b64 is not None
         )
+        status = "success"
         return ChatResponse(
             response=response_text,
             annotated_image_base64=annotated_image_b64,
             tokens_used=tokens_used,
         )
     finally:
+        duration = time.perf_counter() - start_time
+
+        CHAT_REQUESTS_TOTAL.labels(status=status).inc()
+
+        CHAT_REQUEST_LATENCY_SECONDS.observe(duration)
+
         _current_image_b64.reset(token_img)
         _annotated_image_s3_key.reset(token_key)
         _processed_image_b64.reset(token_proc)
