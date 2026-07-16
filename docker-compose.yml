@@ -125,5 +125,25 @@ services:
       options:
         labels: container_name
 
+  observability-mcp:
+    build:
+      context: ./services/observability-mcp
+    image: ${DOCKERHUB_USERNAME}/observability-mcp:${OBSERVABILITY_MCP_IMAGE_TAG:-local}
+    environment:
+      AWS_REGION: us-east-1
+      DEV_S3_LOGS_BUCKET: adan-polyai-logs-dev
+      PROD_S3_LOGS_BUCKET: adan-polyai-logs-prod
+      DEV_PROMETHEUS_URL: http://prometheus:9090
+      PROD_PROMETHEUS_URL: http://prometheus:9090
+    depends_on:
+      - prometheus
+    stdin_open: true
+    labels:
+      container_name: observability-mcp
+    logging:
+      driver: json-file
+      options:
+        labels: container_name      
+
 volumes:
   grafana-data:
