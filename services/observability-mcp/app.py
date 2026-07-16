@@ -3,7 +3,7 @@ from typing import Any
 
 import boto3
 from fastmcp import FastMCP
-
+import requests
 
 mcp = FastMCP("observability")
 
@@ -17,6 +17,16 @@ PROD_S3_LOGS_BUCKET = os.getenv(
     "adan-polyai-logs-prod",
 )
 
+DEV_PROMETHEUS_URL = os.getenv(
+    "DEV_PROMETHEUS_URL",
+    "http://adan-dev.fursa.click:9090",
+)
+
+PROD_PROMETHEUS_URL = os.getenv(
+    "PROD_PROMETHEUS_URL",
+    "http://prod.adan.fursa.click:9090",
+)
+
 s3_client = boto3.client("s3", region_name=AWS_REGION)
 
 
@@ -28,6 +38,18 @@ def _get_logs_bucket(environment: str) -> str:
 
     if normalized_environment == "prod":
         return PROD_S3_LOGS_BUCKET
+
+    raise ValueError("Invalid environment. Use 'dev' or 'prod'.")
+
+
+def _get_prometheus_url(environment: str) -> str:
+    normalized_environment = environment.strip().lower()
+
+    if normalized_environment == "dev":
+        return DEV_PROMETHEUS_URL
+
+    if normalized_environment == "prod":
+        return PROD_PROMETHEUS_URL
 
     raise ValueError("Invalid environment. Use 'dev' or 'prod'.")
 
@@ -74,6 +96,43 @@ def list_log_files(
         "bucket": bucket,
         "count": len(files),
         "files": files,
+    }
+
+
+@mcp.tool
+def query_prometheus(
+    query: str,
+    environment: str = "dev",
+) -> dict[str, Any]:
+    """
+    Execute a PromQL instant query against Prometheus for the
+    selected environment.
+    """
+    if not query.strip():
+        raise ValueError("query must not be empty")
+
+    prometheus_url = _get_prometheus_url(environment)
+
+    response = requests.get(
+        f"{prometheus_url}/api/v1/query",
+        params={"query": query},
+        timeout=15,
+    )
+    response.raise_for_status()
+
+    payload = response.json()
+
+    if payload.get("status") != "success":
+        raise RuntimeError(f"Prometheus query failed: {payload}")
+
+    result_data = payload.get("data", {})
+
+    return {
+        "environment": environment.lower(),
+        "prometheus_url": prometheus_url,
+        "query": query,
+        "result_type": result_data.get("resultType"),
+        "result": result_data.get("result"),
     }
 
 
