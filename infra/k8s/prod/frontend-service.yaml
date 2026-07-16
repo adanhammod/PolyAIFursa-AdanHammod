@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: frontend
-  namespace: dev
+  namespace: prod
   labels:
     app: frontend
 spec:
@@ -13,5 +13,5 @@ spec:
     - name: http
       port: 3000
       targetPort: 3000
-      nodePort: 30300
+      nodePort: 31300
       protocol: TCP

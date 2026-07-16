@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: node-exporter
-  namespace: dev
+  namespace: prod
   labels:
     app: node-exporter
 spec:
