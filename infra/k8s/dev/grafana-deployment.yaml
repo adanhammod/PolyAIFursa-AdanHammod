@@ -45,6 +45,11 @@ spec:
               subPath: dashboards.yaml
               readOnly: true
 
+            - name: grafana-datasource
+              mountPath: /etc/grafana/provisioning/datasources/datasource.yaml
+              subPath: datasource.yaml
+              readOnly: true
+
           resources:
             requests:
               cpu: 100m
@@ -62,3 +67,7 @@ spec:
         - name: grafana-dashboard-provider
           configMap:
             name: grafana-dashboard-provider
+
+        - name: grafana-datasource
+          configMap:
+            name: grafana-datasource
