@@ -708,6 +708,8 @@ app.add_middleware(
         "http://adan-dev.fursa.click:3000",
         "http://localhost:3000",
         "http://13.223.184.237:30300",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
     ],
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["Content-Type"],
