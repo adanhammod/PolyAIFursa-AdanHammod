@@ -40,6 +40,11 @@ spec:
               subPath: agent.json
               readOnly: true
 
+            - name: grafana-dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml
+              subPath: dashboards.yaml
+              readOnly: true
+
           resources:
             requests:
               cpu: 100m
@@ -53,3 +58,7 @@ spec:
         - name: grafana-agent-dashboard
           configMap:
             name: grafana-agent-dashboard
+
+        - name: grafana-dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
