@@ -5,7 +5,6 @@ services:
     image: ${DOCKERHUB_USERNAME}/yolo-service:${YOLO_IMAGE_TAG:-local}
     ports:
       - "8080:8080"
-<<<<<<< HEAD
     env_file:
       - ./services/yolo/.env
     labels:
@@ -14,9 +13,6 @@ services:
       driver: json-file
       options:
         labels: container_name
-=======
-
->>>>>>> origin/main
 
   img-proc-mcp:
     build:
@@ -26,15 +22,12 @@ services:
       - "9000:9000"
     environment:
       FASTMCP_PORT: 9000
-<<<<<<< HEAD
     labels:
       container_name: img-proc-mcp
     logging:
       driver: json-file
       options:
         labels: container_name
-=======
->>>>>>> origin/main
 
   agent:
     build:
@@ -50,29 +43,22 @@ services:
     depends_on:
       - yolo
       - img-proc-mcp
-<<<<<<< HEAD
     labels:
       container_name: agent-service
     logging:
       driver: json-file
       options:
         labels: container_name
-=======
->>>>>>> origin/main
 
   frontend:
     build:
       context: ./services/frontend
-<<<<<<< HEAD
       args:
         NEXT_PUBLIC_AGENT_URL: http://adan-dev.fursa.click:8000
-=======
->>>>>>> origin/main
     image: ${DOCKERHUB_USERNAME}/frontend:${FRONTEND_IMAGE_TAG:-local}
     ports:
       - "3000:3000"
     environment:
-<<<<<<< HEAD
       NEXT_PUBLIC_AGENT_URL: http://adan-dev.fursa.click:8000
     depends_on:
       - agent
@@ -82,11 +68,6 @@ services:
       driver: json-file
       options:
         labels: container_name
-=======
-      NEXT_PUBLIC_AGENT_URL: http://localhost:8000
-    depends_on:
-      - agent
->>>>>>> origin/main
 
   prometheus:
     image: prom/prometheus:v2.55.1
@@ -98,15 +79,12 @@ services:
       - agent
       - yolo
       - node-exporter
-<<<<<<< HEAD
     labels:
       container_name: prometheus
     logging:
       driver: json-file
       options:
         labels: container_name
-=======
->>>>>>> origin/main
 
   grafana:
     image: grafana/grafana:11.3.0
@@ -116,21 +94,17 @@ services:
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
-<<<<<<< HEAD
     labels:
       container_name: grafana
     logging:
       driver: json-file
       options:
         labels: container_name
-=======
->>>>>>> origin/main
 
   node-exporter:
     image: prom/node-exporter:v1.8.2
     ports:
       - "9100:9100"
-<<<<<<< HEAD
     labels:
       container_name: node-exporter
     logging:
@@ -172,8 +146,6 @@ services:
       driver: json-file
       options:
         labels: container_name      
-=======
->>>>>>> origin/main
 
 volumes:
   grafana-data:
