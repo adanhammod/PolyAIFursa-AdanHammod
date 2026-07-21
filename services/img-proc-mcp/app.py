@@ -17,6 +17,7 @@ mcp = FastMCP(
         enable_dns_rebinding_protection=True,
         allowed_hosts=[
             "img-proc-mcp:9000",
+            "img-proc-mcp-svc:9000",
             "localhost:9000",
             "127.0.0.1:9000",
             "host.docker.internal:9000",
@@ -76,10 +77,20 @@ def resize(image_b64: str, width: int, height: int) -> str:
 def crop(image_b64: str, left: int, top: int, right: int, bottom: int) -> str:
     img = _decode(image_b64)
     w, h = img.size
-    if left < 0 or top < 0 or right > w or bottom > h or left >= right or top >= bottom:
+
+    left, right = sorted((left, right))
+    top, bottom = sorted((top, bottom))
+
+    left = max(0, left)
+    top = max(0, top)
+    right = min(w, right)
+    bottom = min(h, bottom)
+
+    if left >= right or top >= bottom:
         raise ValueError(
             f"Invalid crop box ({left}, {top}, {right}, {bottom}) for image of size {w}x{h}."
         )
+
     return _encode(img.crop((left, top, right, bottom)))
 
 
@@ -105,18 +116,36 @@ def replace_region(
     right: int,
     bottom: int,
 ) -> str:
-    original = _decode(original_image_b64)
-    region = _decode(processed_region_b64)
-    w, h = original.size
-    left = max(0, left)
-    top = max(0, top)
-    right = min(w, right)
-    bottom = min(h, bottom)
-    if left >= right or top >= bottom:
+    """Paste a processed region onto the original image, centered on the original bounding box.
+
+    The processed region is used at its natural size (no scaling).
+    Any part that extends beyond the original image boundary is clipped.
+    Returns the full composite image as base64 PNG.
+    """
+    original = _decode(original_image_b64).convert("RGB")
+    region = _decode(processed_region_b64).convert("RGB")
+
+    orig_w, orig_h = original.size
+    region_w, region_h = region.size
+
+    cx = (left + right) / 2
+    cy = (top + bottom) / 2
+    paste_left = int(cx - region_w / 2)
+    paste_top = int(cy - region_h / 2)
+
+    src_x = max(0, -paste_left)
+    src_y = max(0, -paste_top)
+    dst_x = max(0, paste_left)
+    dst_y = max(0, paste_top)
+    visible_w = min(region_w - src_x, orig_w - dst_x)
+    visible_h = min(region_h - src_y, orig_h - dst_y)
+
+    if visible_w <= 0 or visible_h <= 0:
         return _encode(original)
-    region = region.resize((right - left, bottom - top))
+
+    region_clip = region.crop((src_x, src_y, src_x + visible_w, src_y + visible_h))
     result = original.copy()
-    result.paste(region, (left, top))
+    result.paste(region_clip, (dst_x, dst_y))
     return _encode(result)
 
 
