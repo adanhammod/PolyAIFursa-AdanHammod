@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: dev
+  labels:
+    app: grafana
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: grafana
+
+  template:
+    metadata:
+      labels:
+        app: grafana
+
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.0
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - containerPort: 3000
+
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: "admin"
+
+          volumeMounts:
+            - name: grafana-agent-dashboard
+              mountPath: /var/lib/grafana/dashboards/agent.json
+              subPath: agent.json
+              readOnly: true
+
+            - name: grafana-dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml
+              subPath: dashboards.yaml
+              readOnly: true
+
+            - name: grafana-datasource
+              mountPath: /etc/grafana/provisioning/datasources/datasource.yaml
+              subPath: datasource.yaml
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+      volumes:
+        - name: grafana-agent-dashboard
+          configMap:
+            name: grafana-agent-dashboard
+
+        - name: grafana-dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+
+        - name: grafana-datasource
+          configMap:
+            name: grafana-datasource

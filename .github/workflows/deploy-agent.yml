@@ -26,7 +26,9 @@ jobs:
         with:
           context: ./services/agent
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/agent-service:${{ github.sha }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/agent-service:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/agent-service:${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
 
       - name: Deploy Agent to Dev
         if: github.ref == 'refs/heads/dev'
@@ -45,7 +47,12 @@ jobs:
             grep -q "^AGENT_IMAGE_TAG=" .env && sed -i "s|^AGENT_IMAGE_TAG=.*|AGENT_IMAGE_TAG=${{ github.sha }}|" .env || echo "AGENT_IMAGE_TAG=${{ github.sha }}" >> .env
 
             docker compose pull agent
+            docker compose up -d --no-build img-proc-mcp
             docker compose up -d --no-build agent
+
+            sleep 5
+            docker compose ps agent
+            docker compose logs agent --tail=80
 
       - name: Deploy Agent to Prod
         if: github.ref == 'refs/heads/main'
@@ -54,6 +61,7 @@ jobs:
           host: prod.adan.fursa.click
           username: ubuntu
           key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
+          command_timeout: 10m
           script: |
             cd ~/PolyAIFursa-AdanHammod
             git pull origin main
@@ -63,4 +71,9 @@ jobs:
             grep -q "^AGENT_IMAGE_TAG=" .env && sed -i "s|^AGENT_IMAGE_TAG=.*|AGENT_IMAGE_TAG=${{ github.sha }}|" .env || echo "AGENT_IMAGE_TAG=${{ github.sha }}" >> .env
 
             docker compose pull agent
+            docker compose up -d --no-build img-proc-mcp
             docker compose up -d --no-build agent
+
+            sleep 5
+            docker compose ps agent
+            docker compose logs agent --tail=80

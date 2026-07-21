@@ -26,8 +26,11 @@ jobs:
         with:
           context: ./services/frontend
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.sha }}
-
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+          build-args: |
+            NEXT_PUBLIC_AGENT_URL=${{ github.ref == 'refs/heads/main' && 'http://prod.adan.fursa.click:8000' || 'http://localhost:8000' }}
       - name: Deploy Frontend to Dev
         if: github.ref == 'refs/heads/dev'
         uses: appleboy/ssh-action@v1.0.3
@@ -54,6 +57,7 @@ jobs:
           host: prod.adan.fursa.click
           username: ubuntu
           key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
+          command_timeout: 10m
           script: |
             cd ~/PolyAIFursa-AdanHammod
             git pull origin main

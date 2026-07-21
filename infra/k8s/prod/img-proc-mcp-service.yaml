@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: img-proc-mcp
+  namespace: prod
+  labels:
+    app: img-proc-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app: img-proc-mcp
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000
+      protocol: TCP

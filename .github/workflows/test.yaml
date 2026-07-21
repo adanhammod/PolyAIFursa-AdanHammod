@@ -10,7 +10,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  test:
+  test-yolo:
     runs-on: ubuntu-latest
 
     steps:
@@ -38,6 +38,31 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: services/yolo/coverage.xml
           fail_ci_if_error: true
+  test-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r services/agent/requirements.txt
+
+      - name: Run agent tests
+        working-directory: services/agent
+        env:
+          MODEL: bedrock/anthropic.claude-3-haiku-20240307-v1:0
+          AWS_REGION: us-east-1
+          AWS_S3_BUCKET: test-bucket
+        run: |
+          python -m pip show langchain-mcp-adapters
+          python -c "import langchain_mcp_adapters; print('Import successful')"
+          pytest tests/ -v
 
   docker-scout:
     runs-on: ubuntu-latest
