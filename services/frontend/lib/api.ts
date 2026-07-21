@@ -8,10 +8,15 @@ export interface AgentReply {
 }
 
 export async function sendMessage(messages: ChatMessage[]): Promise<AgentReply> {
+  // Each image-processing request is self-contained. Sending conversation history
+  // causes the LLM to echo previous assistant turns or re-run earlier operations.
+  // Only the most recent user message is needed.
+  const lastMsg = messages[messages.length - 1];
+
   const res = await fetch(`${AGENT_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages: lastMsg ? [lastMsg] : [] }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);

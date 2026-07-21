@@ -4,12 +4,27 @@ import os
 
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
-from fastmcp import FastMCP
-
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 MCP_PORT = int(os.environ.get("FASTMCP_PORT", 9000))
 
-mcp = FastMCP("img-proc")
+mcp = FastMCP(
+    "img-proc",
+    host="0.0.0.0",
+    port=MCP_PORT,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "img-proc-mcp:9000",
+            "img-proc-mcp-svc:9000",
+            "localhost:9000",
+            "127.0.0.1:9000",
+            "host.docker.internal:9000",
+        ],
+        allowed_origins=["*"],
+    ),
+)
 
 
 def _decode(image_b64: str) -> Image.Image:
@@ -62,10 +77,20 @@ def resize(image_b64: str, width: int, height: int) -> str:
 def crop(image_b64: str, left: int, top: int, right: int, bottom: int) -> str:
     img = _decode(image_b64)
     w, h = img.size
-    if left < 0 or top < 0 or right > w or bottom > h or left >= right or top >= bottom:
+
+    left, right = sorted((left, right))
+    top, bottom = sorted((top, bottom))
+
+    left = max(0, left)
+    top = max(0, top)
+    right = min(w, right)
+    bottom = min(h, bottom)
+
+    if left >= right or top >= bottom:
         raise ValueError(
             f"Invalid crop box ({left}, {top}, {right}, {bottom}) for image of size {w}x{h}."
         )
+
     return _encode(img.crop((left, top, right, bottom)))
 
 
@@ -125,5 +150,4 @@ def replace_region(
 
 
 if __name__ == "__main__":
-    os.environ["FASTMCP_PORT"] = str(MCP_PORT)
-    mcp.run(transport="http")
+    mcp.run(transport="streamable-http")
