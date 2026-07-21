@@ -1,0 +1,71 @@
+services:
+  yolo:
+    build:
+      context: ./services/yolo
+    image: ${DOCKERHUB_USERNAME}/yolo-service:${YOLO_IMAGE_TAG:-local}
+    ports:
+      - "8080:8080"
+
+
+  img-proc-mcp:
+    build:
+      context: ./services/img-proc-mcp
+    image: ${DOCKERHUB_USERNAME}/img-proc-mcp:${IMG_PROC_MCP_IMAGE_TAG:-local}
+    ports:
+      - "9000:9000"
+    environment:
+      FASTMCP_PORT: 9000
+
+  agent:
+    build:
+      context: ./services/agent
+    image: ${DOCKERHUB_USERNAME}/agent-service:${AGENT_IMAGE_TAG:-local}
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./services/agent/.env
+    environment:
+      YOLO_SERVICE_URL: http://yolo:8080
+      IMG_PROC_MCP_URL: http://img-proc-mcp:9000
+    depends_on:
+      - yolo
+      - img-proc-mcp
+
+  frontend:
+    build:
+      context: ./services/frontend
+    image: ${DOCKERHUB_USERNAME}/frontend:${FRONTEND_IMAGE_TAG:-local}
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_AGENT_URL: http://localhost:8000
+    depends_on:
+      - agent
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - agent
+      - yolo
+      - node-exporter
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    ports:
+      - "9100:9100"
+
+volumes:
+  grafana-data:
