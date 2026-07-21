@@ -13,7 +13,6 @@ boto3
 mcp
 pytest
 pytest-asyncio
-langchain-mcp-adapters
 pytest-cov
 
 prometheus-fastapi-instrumentator
