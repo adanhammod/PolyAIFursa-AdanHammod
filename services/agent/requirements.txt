@@ -11,3 +11,4 @@ pydantic
 boto3
 pytest
 pytest-asyncio
+langchain-mcp-adapters
