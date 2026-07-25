@@ -4,7 +4,17 @@ import io
 import pytest
 from PIL import Image
 
-from app import _decode, _encode, rotate, flip, blur, resize, crop, add_noise, replace_region
+from app import (
+    _decode,
+    _encode,
+    rotate,
+    flip,
+    blur,
+    resize,
+    crop,
+    add_noise,
+    replace_region,
+)
 
 
 @pytest.fixture
@@ -82,7 +92,9 @@ def test_replace_region_same_size(sample_b64):
     # Patch a 20x20 region at box (10, 10, 30, 30); region same size as box → exact placement
     region_img = Image.new("RGB", (20, 20), color=(255, 0, 0))
     region_b64 = _encode(region_img)
-    result_b64 = replace_region(sample_b64, region_b64, left=10, top=10, right=30, bottom=30)
+    result_b64 = replace_region(
+        sample_b64, region_b64, left=10, top=10, right=30, bottom=30
+    )
     assert_valid_png(result_b64)
     result = _decode(result_b64)
     assert result.size == (100, 80)
@@ -93,7 +105,9 @@ def test_replace_region_oversized_clips(sample_b64):
     # Processed region larger than box (e.g. rotated) — must clip, not raise
     large_region = Image.new("RGB", (60, 60), color=(0, 255, 0))
     region_b64 = _encode(large_region)
-    result_b64 = replace_region(sample_b64, region_b64, left=80, top=60, right=90, bottom=70)
+    result_b64 = replace_region(
+        sample_b64, region_b64, left=80, top=60, right=90, bottom=70
+    )
     assert_valid_png(result_b64)
     result = _decode(result_b64)
     assert result.size == (100, 80)  # original size preserved
@@ -103,7 +117,9 @@ def test_replace_region_fully_outside_returns_original(sample_b64):
     # Region centered so far outside image bounds that nothing is pasted
     tiny_region = Image.new("RGB", (2, 2), color=(0, 0, 255))
     region_b64 = _encode(tiny_region)
-    result_b64 = replace_region(sample_b64, region_b64, left=200, top=200, right=210, bottom=210)
+    result_b64 = replace_region(
+        sample_b64, region_b64, left=200, top=200, right=210, bottom=210
+    )
     assert_valid_png(result_b64)
     result = _decode(result_b64)
     assert result.size == (100, 80)
