@@ -47,3 +47,7 @@ services/frontend/node_modules/
 services/frontend/out/
 
 coverage.xml
+
+**/.terraform/
+*.tfstate
+*.tfstate.*
