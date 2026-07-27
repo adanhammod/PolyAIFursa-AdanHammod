@@ -1,0 +1,362 @@
+name: Provision and Bootstrap Kubernetes Cluster
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: AWS region to provision the cluster in
+        required: true
+        default: us-east-1
+        type: choice
+        options:
+          - us-east-1
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    name: Provision AWS Infrastructure
+    runs-on: ubuntu-latest
+
+    outputs:
+      control_plane_ip: ${{ steps.terraform-output.outputs.control_plane_ip }}
+
+    defaults:
+      run:
+        working-directory: infra/tf
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ github.event.inputs.region }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init -reconfigure
+
+      - name: Select or create Terraform workspace
+        shell: bash
+        run: |
+          REGION="${{ github.event.inputs.region }}"
+
+          if terraform workspace select "$REGION"; then
+            echo "Selected existing workspace: $REGION"
+          else
+            terraform workspace new "$REGION"
+            echo "Created new workspace: $REGION"
+          fi
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: |
+          terraform plan \
+            -var-file="tfvars/${{ github.event.inputs.region }}.tfvars" \
+            -out=tfplan
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Read control plane IP
+        id: terraform-output
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="$(terraform output -raw control_plane_public_ip)"
+
+          if [ -z "$CONTROL_PLANE_IP" ]; then
+            echo "Terraform did not return the control plane public IP."
+            exit 1
+          fi
+
+          echo "control_plane_ip=$CONTROL_PLANE_IP" >> "$GITHUB_OUTPUT"
+          echo "Control plane IP retrieved successfully."
+
+  bootstrap:
+    name: Bootstrap Kubernetes Cluster
+    runs-on: ubuntu-latest
+    needs: provision
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+
+          printf '%s\n' "${{ secrets.EC2_SSH_PRIVATE_KEY }}" \
+            > ~/.ssh/id_rsa
+
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Wait for SSH
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          for attempt in {1..30}; do
+            if ssh-keyscan \
+              -T 5 \
+              -H "$CONTROL_PLANE_IP" \
+              >> ~/.ssh/known_hosts 2>/dev/null; then
+
+              echo "SSH is available."
+              exit 0
+            fi
+
+            echo "Waiting for SSH... attempt $attempt/30"
+            sleep 10
+          done
+
+          echo "Control plane SSH did not become available."
+          exit 1
+
+      - name: Test SSH connection
+        shell: bash
+        run: |
+          ssh \
+            -i ~/.ssh/id_rsa \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            ubuntu@${{ needs.provision.outputs.control_plane_ip }} \
+            "echo 'Connected to control plane successfully'"
+
+      - name: Copy Kubernetes bootstrap manifests
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          ssh \
+            -i ~/.ssh/id_rsa \
+            ubuntu@"$CONTROL_PLANE_IP" \
+            "mkdir -p ~/cluster-bootstrap/argocd ~/cluster-bootstrap/namespaces ~/cluster-bootstrap/cluster"
+
+          scp \
+            -i ~/.ssh/id_rsa \
+            infra/argocd/dev-application.yaml \
+            infra/argocd/prod-application.yaml \
+            ubuntu@"$CONTROL_PLANE_IP":~/cluster-bootstrap/argocd/
+
+          scp \
+            -i ~/.ssh/id_rsa \
+            infra/k8s/namespaces/dev.yaml \
+            infra/k8s/namespaces/prod.yaml \
+            ubuntu@"$CONTROL_PLANE_IP":~/cluster-bootstrap/namespaces/
+
+          scp \
+            -i ~/.ssh/id_rsa \
+            infra/k8s/cluster/ebs-storageclass.yaml \
+            ubuntu@"$CONTROL_PLANE_IP":~/cluster-bootstrap/cluster/
+
+      - name: Install Calico
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          ssh \
+            -i ~/.ssh/id_rsa \
+            ubuntu@"$CONTROL_PLANE_IP" << 'EOF'
+          set -euo pipefail
+
+          export KUBECONFIG=/home/ubuntu/.kube/config
+
+          echo "Checking Kubernetes API..."
+          kubectl cluster-info
+
+          echo "Installing or updating Calico..."
+
+          kubectl apply \
+            -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml
+
+          echo "Waiting for Calico kube-controllers..."
+          kubectl rollout status \
+            deployment/calico-kube-controllers \
+            -n kube-system \
+            --timeout=10m
+
+          echo "Waiting for Calico node DaemonSet..."
+          kubectl rollout status \
+            daemonset/calico-node \
+            -n kube-system \
+            --timeout=10m
+
+          echo "Waiting for Kubernetes nodes to become Ready..."
+          kubectl wait \
+            --for=condition=Ready \
+            nodes \
+            --all \
+            --timeout=10m
+
+          kubectl get nodes -o wide
+          EOF
+
+      - name: Create Kubernetes namespaces and storage class
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          ssh \
+            -i ~/.ssh/id_rsa \
+            ubuntu@"$CONTROL_PLANE_IP" << 'EOF'
+          set -euo pipefail
+
+          export KUBECONFIG=/home/ubuntu/.kube/config
+
+          kubectl apply \
+            -f ~/cluster-bootstrap/namespaces/dev.yaml
+
+          kubectl apply \
+            -f ~/cluster-bootstrap/namespaces/prod.yaml
+
+          kubectl apply \
+            -f ~/cluster-bootstrap/cluster/ebs-storageclass.yaml
+
+          kubectl get namespaces
+          kubectl get storageclass
+          EOF
+
+      - name: Install ArgoCD
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          ssh \
+            -i ~/.ssh/id_rsa \
+            ubuntu@"$CONTROL_PLANE_IP" << 'EOF'
+          set -euo pipefail
+
+          export KUBECONFIG=/home/ubuntu/.kube/config
+
+          echo "Creating ArgoCD namespace..."
+          kubectl create namespace argocd \
+            --dry-run=client \
+            -o yaml \
+            | kubectl apply -f -
+
+          echo "Installing or updating ArgoCD..."
+          kubectl apply \
+            -n argocd \
+            --server-side \
+            --force-conflicts \
+            -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+          echo "Waiting for ArgoCD deployments..."
+
+          kubectl rollout status \
+            deployment/argocd-server \
+            -n argocd \
+            --timeout=10m
+
+          kubectl rollout status \
+            deployment/argocd-repo-server \
+            -n argocd \
+            --timeout=10m
+
+          kubectl rollout status \
+            deployment/argocd-dex-server \
+            -n argocd \
+            --timeout=10m
+
+          kubectl rollout status \
+            deployment/argocd-redis \
+            -n argocd \
+            --timeout=10m
+
+          kubectl rollout status \
+            deployment/argocd-applicationset-controller \
+            -n argocd \
+            --timeout=10m
+
+          kubectl rollout status \
+            statefulset/argocd-application-controller \
+            -n argocd \
+            --timeout=10m
+
+          kubectl get pods -n argocd
+          EOF
+
+      - name: Create ArgoCD applications
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          ssh \
+            -i ~/.ssh/id_rsa \
+            ubuntu@"$CONTROL_PLANE_IP" << 'EOF'
+          set -euo pipefail
+
+          export KUBECONFIG=/home/ubuntu/.kube/config
+
+          echo "Waiting for ArgoCD Application CRD..."
+
+          for attempt in {1..30}; do
+            if kubectl get crd applications.argoproj.io >/dev/null 2>&1; then
+              echo "ArgoCD Application CRD is available."
+              break
+            fi
+
+            if [ "$attempt" -eq 30 ]; then
+              echo "ArgoCD Application CRD did not become available."
+              exit 1
+            fi
+
+            echo "Waiting for Application CRD... attempt $attempt/30"
+            sleep 10
+          done
+
+          echo "Applying development Application..."
+          kubectl apply \
+            -f ~/cluster-bootstrap/argocd/dev-application.yaml
+
+          echo "Applying production Application..."
+          kubectl apply \
+            -f ~/cluster-bootstrap/argocd/prod-application.yaml
+
+          echo "ArgoCD Applications:"
+          kubectl get applications \
+            -n argocd
+          EOF
+
+      - name: Show cluster status
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          ssh \
+            -i ~/.ssh/id_rsa \
+            ubuntu@"$CONTROL_PLANE_IP" << 'EOF'
+          set -euo pipefail
+
+          export KUBECONFIG=/home/ubuntu/.kube/config
+
+          echo "===== Nodes ====="
+          kubectl get nodes -o wide
+
+          echo "===== ArgoCD pods ====="
+          kubectl get pods -n argocd
+
+          echo "===== ArgoCD Applications ====="
+          kubectl get applications -n argocd
+
+          echo "===== Dev resources ====="
+          kubectl get all -n dev
+
+          echo "===== Prod resources ====="
+          kubectl get all -n prod
+          EOF
