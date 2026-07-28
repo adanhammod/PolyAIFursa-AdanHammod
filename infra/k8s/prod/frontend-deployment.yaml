@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: adanhammod/frontend:dev
+          image: adanhammod/frontend:prod-544d119
           imagePullPolicy: Always
 
           ports:
