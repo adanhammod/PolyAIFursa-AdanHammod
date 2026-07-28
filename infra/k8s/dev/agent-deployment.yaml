@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: adanhammod/agent-service:dev-9c313fd
+          image: adanhammod/agent-service:dev-32d74b1
           imagePullPolicy: Always
 
           ports:
