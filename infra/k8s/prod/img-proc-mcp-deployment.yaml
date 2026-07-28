@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: img-proc-mcp
-          image: adanhammod/img-proc-mcp:dev
+          image: adanhammod/img-proc-mcp:prod-544d119
           imagePullPolicy: Always
           ports:
             - containerPort: 9000
