@@ -5,14 +5,14 @@ langchain
 langgraph
 langchain-core
 langchain-aws
-langchain-mcp-adapters
 
 httpx
 pydantic
 boto3
-mcp
 pytest
 pytest-asyncio
 pytest-cov
 
 prometheus-fastapi-instrumentator
+mcp>=1.27,<2
+langchain-mcp-adapters==0.3.0

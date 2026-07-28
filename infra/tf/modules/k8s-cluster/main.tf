@@ -134,7 +134,7 @@ data "aws_ami" "ubuntu" {
 }
 
 resource "aws_instance" "control_plane" {
-  ami           = data.aws_ami.ubuntu.id
+  ami           = var.ami_id
   instance_type = var.instance_type
   key_name      = var.key_name
 
@@ -280,14 +280,17 @@ resource "aws_autoscaling_group" "workers" {
   }
 
   depends_on = [
-    aws_instance.control_plane
+    aws_instance.control_plane,
+    aws_ssm_parameter.kubeadm_join_command,
+    aws_iam_role_policy.worker_ssm_join,
+    aws_iam_role_policy.control_plane_ssm_join
   ]
 }
 
 
 resource "aws_launch_template" "worker" {
   name_prefix   = "adan-k8s-worker-"
-  image_id      = data.aws_ami.ubuntu.id
+  image_id      = var.ami_id
   instance_type = var.instance_type
   key_name      = var.key_name
 
@@ -331,6 +334,10 @@ resource "aws_ssm_parameter" "kubeadm_join_command" {
   name  = "/k8s/adan/join-command"
   type  = "SecureString"
   value = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
 
   tags = {
     Name = "adan-k8s-join-command"
