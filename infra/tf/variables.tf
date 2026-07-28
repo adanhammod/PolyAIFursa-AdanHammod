@@ -21,3 +21,8 @@ variable "key_name" {
   description = "Existing AWS EC2 key pair name"
   type        = string
 }
+
+variable "ami_id" {
+  description = "Ubuntu AMI ID used by the control plane and worker nodes"
+  type        = string
+}
