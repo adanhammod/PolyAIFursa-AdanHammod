@@ -6,15 +6,13 @@ on:
       - dev
       - main
 
-    # ה-Workflow ירוץ רק כאשר השתנה קוד של שירות
-    # או כאשר שינינו את ה-Workflow עצמו.
-    # Commit אוטומטי שמשנה רק infra/k8s לא יפעיל אותו שוב.
     paths:
       - "services/**"
       - ".github/workflows/cd.yaml"
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: kubernetes-cd-${{ github.ref }}
@@ -22,6 +20,7 @@ concurrency:
 
 jobs:
   build-and-deploy:
+    name: Build Images and Update Manifests
     runs-on: ubuntu-latest
 
     steps:
@@ -40,10 +39,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set deployment environment
+      - name: Set Deployment Environment
         id: environment
         shell: bash
         run: |
+          set -euo pipefail
+
           if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
             echo "environment=prod" >> "$GITHUB_OUTPUT"
             echo "manifest_dir=infra/k8s/prod" >> "$GITHUB_OUTPUT"
@@ -58,6 +59,7 @@ jobs:
 
           echo "Branch: ${GITHUB_REF_NAME}"
           echo "Commit: ${GITHUB_SHA}"
+          echo "Environment configuration created successfully."
 
       - name: Build and Push Frontend
         uses: docker/build-push-action@v6
@@ -93,7 +95,7 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/img-proc-mcp:${{ steps.environment.outputs.image_tag }}
 
-      - name: Update Kubernetes manifests
+      - name: Update Kubernetes Manifests
         shell: bash
         run: |
           set -euo pipefail
@@ -101,6 +103,8 @@ jobs:
           MANIFEST_DIR="${{ steps.environment.outputs.manifest_dir }}"
           IMAGE_TAG="${{ steps.environment.outputs.image_tag }}"
           DOCKERHUB_USER="${{ secrets.DOCKERHUB_USERNAME }}"
+
+          echo "Updating Kubernetes manifests in ${MANIFEST_DIR}..."
 
           sed -i \
             "s|image: .*frontend:.*|image: ${DOCKERHUB_USER}/frontend:${IMAGE_TAG}|g" \
@@ -119,35 +123,82 @@ jobs:
             "${MANIFEST_DIR}/img-proc-mcp-deployment.yaml"
 
           echo "Updated images:"
+
           grep -R "^[[:space:]]*image:" \
             "${MANIFEST_DIR}/frontend-deployment.yaml" \
             "${MANIFEST_DIR}/agent-deployment.yaml" \
             "${MANIFEST_DIR}/yolo-deployment.yaml" \
             "${MANIFEST_DIR}/img-proc-mcp-deployment.yaml"
 
-      - name: Commit updated manifests
-        id: commit
+      - name: Validate Manifest Changes
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
 
-          git add "${{ steps.environment.outputs.manifest_dir }}"
+          git diff --check
 
-          if git diff --cached --quiet; then
-            echo "No manifest changes to commit."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+          echo "Changed files:"
+          git status --short
+
+      - name: Create Manifest Update Pull Request
+        id: create-pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+
+          base: ${{ github.ref_name }}
+
+          branch: cd/update-${{ steps.environment.outputs.environment }}-manifests
+          delete-branch: true
+
+          add-paths: |
+            ${{ steps.environment.outputs.manifest_dir }}/*.yaml
+
+          commit-message: >-
+            chore(cd): update
+            ${{ steps.environment.outputs.environment }}
+            image tags to
+            ${{ steps.environment.outputs.image_tag }}
+
+          title: >-
+            chore(cd): update
+            ${{ steps.environment.outputs.environment }}
+            Kubernetes image tags
+
+          body: |
+            ## Automated Kubernetes Manifest Update
+
+            This Pull Request was created automatically by the Kubernetes CD workflow.
+
+            **Environment:** `${{ steps.environment.outputs.environment }}`
+
+            **Source branch:** `${{ github.ref_name }}`
+
+            **Source commit:** `${{ github.sha }}`
+
+            **Docker image tag:** `${{ steps.environment.outputs.image_tag }}`
+
+            ### Updated services
+
+            - Frontend
+            - Agent
+            - YOLO
+            - Image Processing MCP
+
+            After this Pull Request is merged, ArgoCD will detect the Kubernetes manifest changes and synchronize the relevant environment.
+
+          labels: |
+            automated
+            kubernetes
+            cd
+
+      - name: Print Pull Request Result
+        shell: bash
+        run: |
+          if [[ -n "${{ steps.create-pr.outputs.pull-request-number }}" ]]; then
+            echo "Pull Request created or updated successfully."
+            echo "PR number: ${{ steps.create-pr.outputs.pull-request-number }}"
+            echo "PR URL: ${{ steps.create-pr.outputs.pull-request-url }}"
           else
-            git commit \
-              -m "chore(cd): update ${{ steps.environment.outputs.environment }} image tags to ${{ steps.environment.outputs.image_tag }}"
-
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "No Pull Request was created because the manifests did not change."
           fi
-
-      - name: Push manifest changes
-        if: steps.commit.outputs.changed == 'true'
-        shell: bash
-        run: |
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
