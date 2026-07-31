@@ -76,16 +76,60 @@ jobs:
         id: terraform-output
         shell: bash
         run: |
-          CONTROL_PLANE_IP="$(terraform output -raw control_plane_public_ip)"
+          set -euo pipefail
 
-          if [ -z "$CONTROL_PLANE_IP" ]; then
-            echo "Terraform did not return the control plane public IP."
+          echo "Trying to read Control Plane public IP from Terraform..."
+
+          CONTROL_PLANE_IP="$(
+            terraform output -raw control_plane_public_ip 2>/dev/null || true
+          )"
+
+          if [ -n "$CONTROL_PLANE_IP" ]; then
+            echo "Control Plane IP from Terraform: $CONTROL_PLANE_IP"
+          else
+            echo "Terraform output is empty."
+            echo "Waiting for AWS to assign a public IP..."
+
+            for attempt in {1..30}; do
+              CONTROL_PLANE_IP="$(
+                aws ec2 describe-instances \
+                  --region "${{ github.event.inputs.region }}" \
+                  --filters \
+                    "Name=tag:Name,Values=adan-k8s-control-plane" \
+                    "Name=instance-state-name,Values=pending,running" \
+                  --query "Reservations[*].Instances[*].PublicIpAddress" \
+                  --output text \
+                  | awk 'NF {print $1; exit}'
+              )"
+
+              if [ -n "$CONTROL_PLANE_IP" ] && [ "$CONTROL_PLANE_IP" != "None" ]; then
+                echo "Control Plane public IP received from AWS: $CONTROL_PLANE_IP"
+                break
+              fi
+
+              echo "Public IP is not available yet. Attempt $attempt/30..."
+              sleep 10
+            done
+          fi
+
+          if [ -z "$CONTROL_PLANE_IP" ] || [ "$CONTROL_PLANE_IP" = "None" ]; then
+            echo "ERROR: Could not determine the Control Plane public IP."
+
+            echo "Current Control Plane EC2 status:"
+
+            aws ec2 describe-instances \
+              --region "${{ github.event.inputs.region }}" \
+              --filters "Name=tag:Name,Values=adan-k8s-control-plane" \
+              --query "Reservations[*].Instances[*].[InstanceId,State.Name,PrivateIpAddress,PublicIpAddress]" \
+              --output table
+
             exit 1
           fi
 
           echo "control_plane_ip=$CONTROL_PLANE_IP" >> "$GITHUB_OUTPUT"
-          echo "Control plane IP retrieved successfully."
 
+          echo "Control Plane public IP: $CONTROL_PLANE_IP"
+          echo "Control Plane IP retrieved successfully."
   bootstrap:
     name: Bootstrap Kubernetes Cluster
     runs-on: ubuntu-latest
