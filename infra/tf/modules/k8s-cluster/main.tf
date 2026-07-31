@@ -90,7 +90,7 @@ resource "aws_vpc_security_group_ingress_rule" "kubernetes_api" {
   security_group_id = aws_security_group.cluster.id
   description       = "Kubernetes API access from administrator IP"
 
-  cidr_ipv4   = var.ssh_allowed_cidr
+  cidr_ipv4   = "10.0.0.0/16"
   from_port   = 6443
   to_port     = 6443
   ip_protocol = "tcp"
