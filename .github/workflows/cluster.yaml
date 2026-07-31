@@ -137,6 +137,82 @@ jobs:
             ubuntu@${{ needs.provision.outputs.control_plane_ip }} \
             "echo 'Connected to control plane successfully'"
 
+      - name: Wait for Control Plane Bootstrap
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          ssh \
+            -i ~/.ssh/id_rsa \
+            ubuntu@"$CONTROL_PLANE_IP" << 'EOF'
+          set -euo pipefail
+
+          echo "Waiting for EC2 user-data to finish..."
+
+          sudo cloud-init status --wait
+
+          echo "Cloud-init completed."
+
+          echo "Checking kubectl installation..."
+
+          if ! command -v kubectl >/dev/null 2>&1; then
+            echo "ERROR: kubectl was not installed successfully."
+            echo "===== Control Plane User Data Log ====="
+            sudo tail -n 150 /var/log/control-plane-user-data.log || true
+            exit 1
+          fi
+
+          echo "kubectl is installed."
+
+          echo "Checking Kubernetes control plane initialization..."
+
+          if [ ! -f /etc/kubernetes/admin.conf ]; then
+            echo "ERROR: /etc/kubernetes/admin.conf does not exist."
+            echo "The control plane was not initialized successfully."
+            echo "===== Control Plane User Data Log ====="
+            sudo tail -n 150 /var/log/control-plane-user-data.log || true
+            exit 1
+          fi
+
+          echo "Kubernetes admin configuration exists."
+
+          if [ ! -f /home/ubuntu/.kube/config ]; then
+            echo "ERROR: /home/ubuntu/.kube/config does not exist."
+            echo "===== Control Plane User Data Log ====="
+            sudo tail -n 150 /var/log/control-plane-user-data.log || true
+            exit 1
+          fi
+
+          export KUBECONFIG=/home/ubuntu/.kube/config
+
+          echo "Waiting for Kubernetes API server..."
+
+          API_READY=false
+
+          for attempt in {1..60}; do
+            if kubectl get --raw='/readyz' >/dev/null 2>&1; then
+              echo "Kubernetes API server is ready."
+              API_READY=true
+              break
+            fi
+
+            echo "Waiting for Kubernetes API... attempt $attempt/60"
+            sleep 10
+          done
+
+          if [ "$API_READY" != "true" ]; then
+            echo "ERROR: Kubernetes API server did not become ready."
+            echo "===== Control Plane User Data Log ====="
+            sudo tail -n 150 /var/log/control-plane-user-data.log || true
+            exit 1
+          fi
+
+          echo "Control Plane bootstrap completed successfully."
+
+          kubectl cluster-info
+          kubectl get nodes -o wide
+          EOF
+
       - name: Copy Kubernetes bootstrap manifests
         shell: bash
         run: |
@@ -185,18 +261,21 @@ jobs:
             -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/calico.yaml
 
           echo "Waiting for Calico kube-controllers..."
+
           kubectl rollout status \
             deployment/calico-kube-controllers \
             -n kube-system \
             --timeout=10m
 
           echo "Waiting for Calico node DaemonSet..."
+
           kubectl rollout status \
             daemonset/calico-node \
             -n kube-system \
             --timeout=10m
 
           echo "Waiting for Kubernetes nodes to become Ready..."
+
           kubectl wait \
             --for=condition=Ready \
             nodes \
@@ -244,12 +323,14 @@ jobs:
           export KUBECONFIG=/home/ubuntu/.kube/config
 
           echo "Creating ArgoCD namespace..."
+
           kubectl create namespace argocd \
             --dry-run=client \
             -o yaml \
             | kubectl apply -f -
 
           echo "Installing or updating ArgoCD..."
+
           kubectl apply \
             -n argocd \
             --server-side \
@@ -305,30 +386,36 @@ jobs:
 
           echo "Waiting for ArgoCD Application CRD..."
 
+          CRD_READY=false
+
           for attempt in {1..30}; do
             if kubectl get crd applications.argoproj.io >/dev/null 2>&1; then
               echo "ArgoCD Application CRD is available."
+              CRD_READY=true
               break
-            fi
-
-            if [ "$attempt" -eq 30 ]; then
-              echo "ArgoCD Application CRD did not become available."
-              exit 1
             fi
 
             echo "Waiting for Application CRD... attempt $attempt/30"
             sleep 10
           done
 
+          if [ "$CRD_READY" != "true" ]; then
+            echo "ERROR: ArgoCD Application CRD did not become available."
+            exit 1
+          fi
+
           echo "Applying development Application..."
+
           kubectl apply \
             -f ~/cluster-bootstrap/argocd/dev-application.yaml
 
           echo "Applying production Application..."
+
           kubectl apply \
             -f ~/cluster-bootstrap/argocd/prod-application.yaml
 
           echo "ArgoCD Applications:"
+
           kubectl get applications \
             -n argocd
           EOF
