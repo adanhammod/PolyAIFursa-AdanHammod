@@ -1,5 +1,5 @@
 aws_region       = "us-east-1"
-ssh_allowed_cidr = "147.235.223.133/32"
+ssh_allowed_cidr = "0.0.0.0/0"
 instance_type    = "t3.medium"
 key_name         = "adan-key"
 ami_id           = "ami-0d001f8052688dc45"
