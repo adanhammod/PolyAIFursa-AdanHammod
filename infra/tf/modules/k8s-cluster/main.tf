@@ -147,6 +147,12 @@ resource "aws_instance" "control_plane" {
 
   iam_instance_profile = aws_iam_instance_profile.control_plane.name
 
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
   root_block_device {
     volume_size = 20
     volume_type = "gp3"
@@ -242,6 +248,11 @@ resource "aws_iam_role_policy_attachment" "worker_ssm_managed_instance" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy_attachment" "worker_ebs_csi_driver_policy" {
+  role       = aws_iam_role.worker.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
 resource "aws_iam_instance_profile" "worker" {
   name = "adan-k8s-worker-instance-profile"
   role = aws_iam_role.worker.name
@@ -283,7 +294,8 @@ resource "aws_autoscaling_group" "workers" {
     aws_instance.control_plane,
     aws_ssm_parameter.kubeadm_join_command,
     aws_iam_role_policy.worker_ssm_join,
-    aws_iam_role_policy.control_plane_ssm_join
+    aws_iam_role_policy.control_plane_ssm_join,
+    aws_iam_role_policy_attachment.worker_ebs_csi_driver_policy
   ]
 }
 
@@ -300,6 +312,12 @@ resource "aws_launch_template" "worker" {
 
   iam_instance_profile {
     name = aws_iam_instance_profile.worker.name
+  }
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
   }
 
   user_data = base64encode(
