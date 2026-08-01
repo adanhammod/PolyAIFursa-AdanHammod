@@ -329,6 +329,63 @@ jobs:
           kubectl get nodes -o wide
           EOF
 
+      - name: Install AWS EBS CSI Driver
+        shell: bash
+        run: |
+          CONTROL_PLANE_IP="${{ needs.provision.outputs.control_plane_ip }}"
+
+          ssh \
+            -i ~/.ssh/id_rsa \
+            ubuntu@"$CONTROL_PLANE_IP" << 'EOF'
+          set -euo pipefail
+
+          export KUBECONFIG=/home/ubuntu/.kube/config
+
+          echo "Ensuring git is installed (required by kubectl apply -k for remote refs)..."
+
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq git
+
+          echo "Checking Kubernetes API..."
+          kubectl cluster-info
+
+          echo "Installing or updating AWS EBS CSI Driver..."
+
+          kubectl apply \
+            -k "github.com/kubernetes-sigs/aws-ebs-csi-driver/deploy/kubernetes/overlays/stable/?ref=v1.35.0"
+
+          echo "Waiting for EBS CSI controller Deployment..."
+
+          kubectl rollout status \
+            deployment/ebs-csi-controller \
+            -n kube-system \
+            --timeout=10m
+
+          echo "Waiting for EBS CSI node DaemonSet..."
+
+          kubectl rollout status \
+            daemonset/ebs-csi-node \
+            -n kube-system \
+            --timeout=10m
+
+          echo "Verifying ebs.csi.aws.com CSIDriver is registered..."
+
+          if ! kubectl get csidriver ebs.csi.aws.com >/dev/null 2>&1; then
+            echo "ERROR: ebs.csi.aws.com CSIDriver was not registered after installation."
+            kubectl get pods -n kube-system
+            kubectl get csidrivers
+            exit 1
+          fi
+
+          echo "AWS EBS CSI Driver installed and ebs.csi.aws.com is registered."
+
+          echo "===== kube-system pods ====="
+          kubectl get pods -n kube-system
+
+          echo "===== CSI drivers ====="
+          kubectl get csidrivers
+          EOF
+
       - name: Create Kubernetes namespaces and storage class
         shell: bash
         run: |
