@@ -147,7 +147,7 @@ echo "Control plane initialization completed successfully"
 # 12. Generate and store worker join command
 # --------------------------------------------------
 
-JOIN_COMMAND=$(kubeadm token create --ttl 24h --print-join-command)
+JOIN_COMMAND=$(kubeadm token create --ttl 0 --print-join-command)
 
 aws ssm put-parameter \
   --name "/k8s/adan/join-command" \
