@@ -75,7 +75,7 @@ resource "aws_lb_target_group" "ingress" {
   health_check {
     protocol            = "HTTP"
     path                = "/"
-    matcher             = "200-399"
+    matcher             = "200-499"
     interval            = 30
     timeout             = 5
     healthy_threshold   = 3
