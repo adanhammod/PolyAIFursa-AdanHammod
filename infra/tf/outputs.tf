@@ -22,3 +22,13 @@ output "cluster_security_group_id" {
   description = "ID of the shared Kubernetes cluster security group"
   value       = module.k8s_cluster.cluster_security_group_id
 }
+
+output "alb_dns_name" {
+  description = "DNS name of the ingress ALB"
+  value       = module.ingress.alb_dns_name
+}
+
+output "alb_zone_id" {
+  description = "Canonical hosted zone ID of the ingress ALB"
+  value       = module.ingress.alb_zone_id
+}
