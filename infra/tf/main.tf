@@ -16,3 +16,12 @@ module "ingress" {
   cluster_security_group_id = module.k8s_cluster.cluster_security_group_id
   worker_asg_name           = module.k8s_cluster.worker_asg_name
 }
+
+module "dns" {
+  source = "./modules/dns"
+
+  zone_name    = "fursa.click"
+  record_name  = "dev.fursa.click"
+  alb_dns_name = module.ingress.alb_dns_name
+  alb_zone_id  = module.ingress.alb_zone_id
+}
