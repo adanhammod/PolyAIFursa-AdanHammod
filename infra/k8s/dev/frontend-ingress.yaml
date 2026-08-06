@@ -10,7 +10,7 @@ spec:
   ingressClassName: nginx
 
   rules:
-    - host: dev.fursa.click
+    - host: dev.adan.fursa.click
       http:
         paths:
           - path: /

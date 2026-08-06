@@ -21,7 +21,7 @@ module "dns" {
   source = "./modules/dns"
 
   zone_name    = "fursa.click"
-  record_name  = "dev.fursa.click"
+  record_name  = "dev.adan.fursa.click"
   alb_dns_name = module.ingress.alb_dns_name
   alb_zone_id  = module.ingress.alb_zone_id
 }
