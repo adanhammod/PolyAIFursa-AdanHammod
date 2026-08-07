@@ -57,7 +57,7 @@ torch.cuda.is_available = lambda: False
 
 app = FastAPI()
 
-
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 is_shutting_down = False
 
 
