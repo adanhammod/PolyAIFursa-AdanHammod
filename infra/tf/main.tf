@@ -25,3 +25,12 @@ module "dns" {
   alb_dns_name = module.ingress.alb_dns_name
   alb_zone_id  = module.ingress.alb_zone_id
 }
+
+module "tls" {
+  source = "./modules/tls"
+
+  domain_name      = "dev.adan.fursa.click"
+  zone_name        = "fursa.click"
+  alb_arn          = module.ingress.alb_arn
+  target_group_arn = module.ingress.target_group_arn
+}
