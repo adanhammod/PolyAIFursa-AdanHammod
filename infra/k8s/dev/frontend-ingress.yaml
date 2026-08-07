@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend
+  namespace: dev
+  labels:
+    app: frontend
+
+spec:
+  ingressClassName: nginx
+
+  rules:
+    - host: dev.adan.fursa.click
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000
