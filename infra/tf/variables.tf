@@ -26,3 +26,8 @@ variable "ami_id" {
   description = "Ubuntu AMI ID used by the control plane and worker nodes"
   type        = string
 }
+
+variable "alert_email" {
+  description = "Email address that receives Kubernetes monitoring alerts"
+  type        = string
+}

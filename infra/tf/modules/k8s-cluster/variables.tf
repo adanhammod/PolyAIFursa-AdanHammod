@@ -22,3 +22,8 @@ variable "ami_id" {
   description = "Ubuntu AMI ID used by control plane and worker nodes"
   type        = string
 }
+
+variable "alerting_sns_topic_arn" {
+  description = "SNS topic ARN that worker nodes may publish Alertmanager notifications to"
+  type        = string
+}
