@@ -382,6 +382,26 @@ resource "aws_iam_role_policy" "worker_ssm_join" {
   })
 }
 
+resource "aws_iam_role_policy" "worker_sns_publish" {
+  name = "adan-worker-sns-publish"
+  role = aws_iam_role.worker.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Action = [
+          "sns:Publish"
+        ]
+
+        Resource = var.alerting_sns_topic_arn
+      }
+    ]
+  })
+}
+
 
 resource "aws_iam_role_policy" "control_plane_ssm_join" {
   name = "adan-control-plane-ssm-join"
