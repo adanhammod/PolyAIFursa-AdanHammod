@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: yolo
-          image: adanhammod/yolo-service:prod-544d119
+          image: adanhammod/yolo-service:prod-001c05e
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
