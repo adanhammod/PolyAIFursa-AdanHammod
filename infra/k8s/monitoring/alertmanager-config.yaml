@@ -1,0 +1,28 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+
+metadata:
+  name: sns-alerts
+  namespace: monitoring
+  labels:
+    app: sns-alerts
+
+spec:
+  route:
+    receiver: sns
+    groupBy:
+      - alertname
+      - namespace
+    groupWait: 10s
+    groupInterval: 30s
+    repeatInterval: 1h
+
+  receivers:
+    - name: sns
+      snsConfigs:
+        - topicARN: arn:aws:sns:us-east-1:228281126655:adan-k8s-alerts
+          sendResolved: true
+          sigv4:
+            region: us-east-1
+          subject: '{{ template "sns.default.subject" . }}'
+          message: '{{ template "sns.default.message" . }}'

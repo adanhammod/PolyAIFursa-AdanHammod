@@ -32,3 +32,13 @@ output "alb_zone_id" {
   description = "Canonical hosted zone ID of the ingress ALB"
   value       = module.ingress.alb_zone_id
 }
+
+output "alerting_sns_topic_arn" {
+  description = "SNS topic ARN used by Alertmanager"
+  value       = module.alerting.topic_arn
+}
+
+output "alerting_sns_topic_name" {
+  description = "SNS topic name used by Alertmanager"
+  value       = module.alerting.topic_name
+}
