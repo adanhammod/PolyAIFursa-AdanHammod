@@ -17,11 +17,23 @@ module "ingress" {
   worker_asg_name           = module.k8s_cluster.worker_asg_name
 }
 
+locals {
+  ingress_hostnames = toset([
+    "dev.adan.fursa.click",
+    "dev-agent.adan.fursa.click",
+    "prod-agent.adan.fursa.click",
+    "grafana.adan.fursa.click",
+    "prometheus.adan.fursa.click",
+    "argocd.adan.fursa.click",
+  ])
+}
+
 module "dns" {
-  source = "./modules/dns"
+  for_each = local.ingress_hostnames
+  source   = "./modules/dns"
 
   zone_name    = "fursa.click"
-  record_name  = "dev.adan.fursa.click"
+  record_name  = each.value
   alb_dns_name = module.ingress.alb_dns_name
   alb_zone_id  = module.ingress.alb_zone_id
 }
@@ -29,7 +41,7 @@ module "dns" {
 module "tls" {
   source = "./modules/tls"
 
-  domain_name      = "dev.adan.fursa.click"
+  domain_name      = "*.adan.fursa.click"
   zone_name        = "fursa.click"
   alb_arn          = module.ingress.alb_arn
   target_group_arn = module.ingress.target_group_arn
