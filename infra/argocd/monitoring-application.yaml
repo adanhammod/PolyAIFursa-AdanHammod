@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: polyai-monitoring
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/adanhammod/PolyAIFursa-AdanHammod.git
+    targetRevision: main
+    path: infra/k8s/monitoring
+    directory:
+      recurse: true
+      exclude: "values.yaml"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
