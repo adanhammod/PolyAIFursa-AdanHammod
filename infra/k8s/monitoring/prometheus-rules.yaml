@@ -1,0 +1,30 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+
+metadata:
+  name: polyai-application-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+
+spec:
+  groups:
+    - name: polyai.application.rules
+      rules:
+        - alert: AgentDown
+          expr: up{service="agent"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Agent service is down"
+            description: "Prometheus has been unable to scrape an agent target for more than 1 minute."
+
+        - alert: YoloDown
+          expr: up{service="yolo"} == 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "YOLO service is down"
+            description: "Prometheus has been unable to scrape a YOLO target for more than 1 minute."
